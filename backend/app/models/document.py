@@ -26,7 +26,7 @@ class Document(Base):
     file_path = Column(String(500), nullable=True)  # Path to stored file
     raw_text = Column(Text, nullable=True)
     status = Column(
-        SQLEnum(DocumentStatus),
+        SQLEnum(DocumentStatus, values_callable=lambda x: [e.value for e in x]),
         default=DocumentStatus.UPLOADED,
         nullable=False
     )

@@ -1,0 +1,24 @@
+SAMPLE LEGISLATIVE AMENDMENT DOCUMENT
+=====================================
+
+This document contains proposed amendments to federal law for testing purposes.
+
+SECTION 1. TAX-EXEMPT ORGANIZATIONS
+
+Section 501(c)(3) of the Internal Revenue Code (26 U.S.C. § 501) is amended by striking "educational" and inserting "educational or charitable".
+
+SECTION 2. NONPROFIT REPORTING REQUIREMENTS
+
+Section 6033 of the Internal Revenue Code (26 U.S.C. § 6033) is amended by adding at the end the following:
+
+"(o) ENHANCED TRANSPARENCY.—Each organization described in section 501(c)(3) shall include in its annual return a description of any lobbying activities conducted during the taxable year."
+
+SECTION 3. CHARITABLE CONTRIBUTIONS
+
+Section 170(b)(1)(A) of the Internal Revenue Code (26 U.S.C. § 170) is amended to read as follows:
+
+"(A) GENERAL RULE.—The deduction shall not exceed 60 percent of the taxpayer's contribution base for the taxable year."
+
+SECTION 4. TECHNICAL CORRECTIONS
+
+Section 7701(a)(1) of the Internal Revenue Code (26 U.S.C. § 7701) is amended by striking "and" before the last item.

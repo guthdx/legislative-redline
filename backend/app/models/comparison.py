@@ -28,7 +28,7 @@ class Comparison(Base):
     citation_text = Column(String(255), nullable=True)
 
     # Amendment details
-    amendment_type = Column(SQLEnum(AmendmentType), nullable=True)
+    amendment_type = Column(SQLEnum(AmendmentType, values_callable=lambda x: [e.value for e in x]), nullable=True)
     amendment_instruction = Column(Text, nullable=True)  # Raw amendment language
 
     # Text comparison

@@ -29,7 +29,7 @@ class Statute(Base):
     heading = Column(String(500), nullable=True)  # Section heading/title
 
     # Source metadata
-    source = Column(SQLEnum(StatuteSource), nullable=False)
+    source = Column(SQLEnum(StatuteSource, values_callable=lambda x: [e.value for e in x]), nullable=False)
     source_url = Column(String(500), nullable=True)
     effective_date = Column(DateTime, nullable=True)
 

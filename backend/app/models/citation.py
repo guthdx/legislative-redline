@@ -20,7 +20,7 @@ class Citation(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
 
-    citation_type = Column(SQLEnum(CitationType), nullable=False)
+    citation_type = Column(SQLEnum(CitationType, values_callable=lambda x: [e.value for e in x]), nullable=False)
     title = Column(Integer, nullable=True)  # e.g., 26 for "26 USC"
     section = Column(String(50), nullable=False)  # e.g., "501" or "482.12"
     subsection = Column(String(100), nullable=True)  # e.g., "(c)(3)"
