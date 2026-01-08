@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.db.session import get_db
 from app.models import Document, DocumentStatus, Citation, Comparison, AmendmentType
 from app.schemas import ComparisonListResponse, ComparisonBase, CompareRequest
-from app.services import AmendmentParser, AmendmentApplier
+from app.services import AmendmentParser, AmendmentApplier, DiffGenerator, generate_redline_html
 from app.services.amendment_parser import AmendmentType as ParsedAmendmentType
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ router = APIRouter(prefix="/documents", tags=["comparisons"])
 # Initialize services
 amendment_parser = AmendmentParser()
 amendment_applier = AmendmentApplier()
+diff_generator = DiffGenerator()
 
 
 @router.post("/{document_id}/compare")
@@ -126,8 +127,13 @@ async def generate_comparisons(
                 # Fallback to keyword detection
                 amendment_type = _detect_amendment_type(context_text)
 
-            # Generate diff HTML
-            diff_html = _generate_diff_html(original_text, amended_text, amendment_type)
+            # Generate diff HTML using diff-match-patch
+            diff_result = diff_generator.generate(original_text, amended_text, max_length=5000)
+            diff_html = generate_redline_html(
+                original_text, amended_text,
+                amendment_type=amendment_type.value,
+                max_length=5000
+            )
 
             # Create comparison record
             comparison = Comparison(
@@ -245,45 +251,3 @@ def _detect_amendment_type(context: str) -> AmendmentType:
         return AmendmentType.UNKNOWN
 
 
-def _generate_diff_html(original_text: str, amended_text: str, amendment_type: AmendmentType) -> str:
-    """
-    Generate diff HTML showing changes between original and amended text.
-
-    Uses simple comparison for now - Phase 5 will use diff-match-patch.
-    """
-    import html
-
-    # Escape HTML in text
-    original_escaped = html.escape(original_text)
-    amended_escaped = html.escape(amended_text)
-
-    # If texts are the same, show as unchanged
-    if original_text == amended_text:
-        if amendment_type == AmendmentType.UNKNOWN:
-            return f'<div class="redline-unchanged">{original_escaped[:500]}{"..." if len(original_escaped) > 500 else ""}</div>'
-        else:
-            return f'''
-<div class="redline-section">
-    <p class="redline-note">Amendment type detected: {amendment_type.value}</p>
-    <p class="redline-note">Could not apply amendment to statute text.</p>
-    <div class="redline-unchanged">{original_escaped[:500]}{"..." if len(original_escaped) > 500 else ""}</div>
-</div>
-'''
-
-    # Simple diff: show deleted (original) and inserted (new) sections
-    # This is a basic implementation - Phase 5 will use proper diff algorithm
-    return f'''
-<div class="redline-section">
-    <p class="redline-note">Amendment type: {amendment_type.value}</p>
-    <div class="redline-comparison">
-        <div class="redline-deleted">
-            <span class="redline-label">Original:</span>
-            <del>{original_escaped[:1000]}{"..." if len(original_escaped) > 1000 else ""}</del>
-        </div>
-        <div class="redline-inserted">
-            <span class="redline-label">Amended:</span>
-            <ins>{amended_escaped[:1000]}{"..." if len(amended_escaped) > 1000 else ""}</ins>
-        </div>
-    </div>
-</div>
-'''

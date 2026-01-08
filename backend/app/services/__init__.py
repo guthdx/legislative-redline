@@ -14,6 +14,11 @@ from app.services.amendment_parser import (
     AmendmentParseResult,
     AmendmentType,
 )
+from app.services.diff_generator import (
+    DiffGenerator,
+    DiffResult,
+    generate_redline_html,
+)
 
 __all__ = [
     "DocumentParser",
@@ -30,4 +35,7 @@ __all__ = [
     "ParsedAmendment",
     "AmendmentParseResult",
     "AmendmentType",
+    "DiffGenerator",
+    "DiffResult",
+    "generate_redline_html",
 ]
