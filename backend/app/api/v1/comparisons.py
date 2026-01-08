@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.db.session import get_db
 from app.models import Document, DocumentStatus, Citation, Comparison, AmendmentType
 from app.schemas import ComparisonListResponse, ComparisonBase, CompareRequest
-from app.services import AmendmentParser, AmendmentApplier, DiffGenerator, generate_redline_html
+from app.services import AmendmentParser, AmendmentApplier, DiffGenerator, generate_redline_html, SubsectionExtractor
 from app.services.amendment_parser import AmendmentType as ParsedAmendmentType
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,60 @@ router = APIRouter(prefix="/documents", tags=["comparisons"])
 amendment_parser = AmendmentParser()
 amendment_applier = AmendmentApplier()
 diff_generator = DiffGenerator()
+subsection_extractor = SubsectionExtractor()
+
+
+def _extract_subsection_notation(section: str) -> str:
+    """
+    Extract subsection notation from a section string.
+
+    Examples:
+        "1922(b)(1)" -> "(b)(1)"
+        "1923(a)" -> "(a)"
+        "501" -> ""
+    """
+    import re
+    # Find all parenthetical parts
+    match = re.search(r'(\([^)]+\))+', section)
+    if match:
+        return match.group(0)
+    return ""
+
+
+def _get_target_text_for_amendment(
+    full_statute_text: str,
+    section: str,
+    parsed_amendment
+) -> tuple:
+    """
+    Get the appropriate text to apply an amendment to.
+
+    If the amendment targets a specific subparagraph, extract that portion.
+    Otherwise, use the subsection from the citation or the full text.
+
+    Returns:
+        (target_text, subsection_notation, is_subsection)
+    """
+    # Check if the parsed amendment has a target section (e.g., "subparagraph (D)")
+    if parsed_amendment and parsed_amendment.target_section:
+        # Extract the target notation from the amendment
+        import re
+        target_match = re.search(r'\(([A-Za-z0-9]+)\)', parsed_amendment.target_section)
+        if target_match:
+            target_notation = f"({target_match.group(1)})"
+            result = subsection_extractor.extract(full_statute_text, target_notation)
+            if result.success and result.extracted_text:
+                return result.extracted_text, target_notation, True
+
+    # Try to extract from the citation's subsection notation
+    subsection_notation = _extract_subsection_notation(section)
+    if subsection_notation:
+        result = subsection_extractor.extract(full_statute_text, subsection_notation)
+        if result.success and result.extracted_text:
+            return result.extracted_text, subsection_notation, True
+
+    # Fall back to full text
+    return full_statute_text, "", False
 
 
 @router.post("/{document_id}/compare")
@@ -124,10 +178,11 @@ async def generate_comparisons(
             parse_result = amendment_parser.parse(context_text)
 
             # Determine amendment type and apply changes
-            original_text = statute.full_text
-            amended_text = original_text
+            full_statute_text = statute.full_text
             amendment_type = AmendmentType.UNKNOWN
             amendment_instruction = ""
+            subsection_notation = ""
+            used_subsection = False
 
             if parse_result.success and parse_result.amendments:
                 # Use the first valid amendment found
@@ -137,22 +192,60 @@ async def generate_comparisons(
                         amendment_type = _map_amendment_type(parsed.amendment_type)
                         amendment_instruction = parsed.raw_instruction
 
-                        # Apply the amendment to get amended text
-                        amended_text, success = amendment_applier.apply(original_text, parsed)
+                        # Get the target text (subsection or full text)
+                        target_text, subsection_notation, used_subsection = _get_target_text_for_amendment(
+                            full_statute_text,
+                            citation.section,
+                            parsed
+                        )
+
+                        if used_subsection:
+                            logger.info(f"Extracted subsection {subsection_notation} for {citation.canonical_citation}")
+
+                        # Apply the amendment to the target text
+                        amended_text, success = amendment_applier.apply(target_text, parsed)
+
                         if success:
                             logger.info(f"Applied {amendment_type.value} amendment for {citation.canonical_citation}")
+                            # Use subsection text for comparison (cleaner diff)
+                            original_text = target_text
                         else:
                             logger.warning(f"Could not apply amendment for {citation.canonical_citation}")
+                            # Fall back to full text
+                            original_text = full_statute_text
+                            amended_text = full_statute_text
                         break
+                else:
+                    # No valid amendments found
+                    original_text = full_statute_text
+                    amended_text = full_statute_text
             else:
                 # Fallback to keyword detection
                 amendment_type = _detect_amendment_type(context_text)
 
+                # Still try to extract subsection for better context
+                subsection_notation = _extract_subsection_notation(citation.section)
+                if subsection_notation:
+                    result = subsection_extractor.extract(full_statute_text, subsection_notation)
+                    if result.success and result.extracted_text:
+                        original_text = result.extracted_text
+                        amended_text = result.extracted_text
+                        used_subsection = True
+                    else:
+                        original_text = full_statute_text
+                        amended_text = full_statute_text
+                else:
+                    original_text = full_statute_text
+                    amended_text = full_statute_text
+
             # Generate diff HTML using diff-match-patch
             diff_result = diff_generator.generate(original_text, amended_text, max_length=5000)
+
+            # Add subsection context to diff if used
+            subsection_info = f" (subsection {subsection_notation})" if used_subsection else ""
             diff_html = generate_redline_html(
                 original_text, amended_text,
-                amendment_type=amendment_type.value,
+                amendment_type=amendment_type.value + subsection_info,
                 max_length=5000
             )
 

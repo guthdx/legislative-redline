@@ -19,6 +19,12 @@ from app.services.diff_generator import (
     DiffResult,
     generate_redline_html,
 )
+from app.services.subsection_extractor import (
+    SubsectionExtractor,
+    ExtractionResult,
+    SubsectionMatch,
+    extract_subsection,
+)
 
 __all__ = [
     "DocumentParser",
@@ -38,4 +44,8 @@ __all__ = [
     "DiffGenerator",
     "DiffResult",
     "generate_redline_html",
+    "SubsectionExtractor",
+    "ExtractionResult",
+    "SubsectionMatch",
+    "extract_subsection",
 ]
