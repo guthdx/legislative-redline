@@ -2,23 +2,104 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Redline styling */
-.redline-deleted {
-  background-color: #fecaca;
+/* ===================================
+   Redline Styling for Legal Documents
+   =================================== */
+
+/* Container for redline content */
+.redline-container {
+  @apply bg-white rounded-lg border border-gray-200 p-4;
+}
+
+/* Amendment type indicator */
+.redline-type {
+  @apply text-sm font-medium text-gray-600 mb-2;
+}
+
+/* Statistics display */
+.redline-stats {
+  @apply text-sm text-gray-500 mb-4 flex space-x-4;
+}
+
+.redline-deletions {
+  @apply text-red-600;
+}
+
+.redline-insertions {
+  @apply text-green-600;
+}
+
+/* Main redline content area */
+.redline-content {
+  @apply font-serif text-base leading-relaxed;
+}
+
+/* Deleted text - strikethrough with red background */
+.redline-deleted,
+del.redline-deleted {
+  background-color: #fee2e2;
   text-decoration: line-through;
+  text-decoration-color: #dc2626;
   color: #991b1b;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 
-.redline-inserted {
-  background-color: #bbf7d0;
+/* Inserted text - green background highlight */
+.redline-inserted,
+ins.redline-inserted {
+  background-color: #dcfce7;
+  text-decoration: none;
   color: #166534;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 
+/* Unchanged text */
 .redline-unchanged {
   color: #374151;
 }
 
-/* File drop zone */
+/* Note/info messages */
+.redline-note {
+  @apply text-sm text-gray-500 italic mb-2;
+}
+
+/* Ellipsis for truncated content */
+.redline-ellipsis {
+  @apply text-gray-400 mx-1;
+}
+
+/* Section wrapper for individual comparisons */
+.redline-section {
+  @apply mb-4;
+}
+
+/* Print styles */
+@media print {
+  .redline-deleted,
+  del.redline-deleted {
+    background-color: #ffcccc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .redline-inserted,
+  ins.redline-inserted {
+    background-color: #ccffcc !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .redline-container {
+    break-inside: avoid;
+  }
+}
+
+/* ===================================
+   File Upload Drop Zone
+   =================================== */
+
 .dropzone {
   @apply border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-colors;
 }
@@ -30,4 +111,25 @@
 
 .dropzone-reject {
   @apply border-red-500 bg-red-50;
+}
+
+/* ===================================
+   Prose Overrides for Legal Content
+   =================================== */
+
+.prose del {
+  text-decoration: line-through;
+  text-decoration-color: #dc2626;
+}
+
+.prose ins {
+  text-decoration: none;
+}
+
+/* Remove default prose styling for del/ins */
+.prose del::before,
+.prose del::after,
+.prose ins::before,
+.prose ins::after {
+  content: '';
 }
