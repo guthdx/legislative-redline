@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Redline styling */
+.redline-deleted {
+  background-color: #fecaca;
+  text-decoration: line-through;
+  color: #991b1b;
+}
+
+.redline-inserted {
+  background-color: #bbf7d0;
+  color: #166534;
+}
+
+.redline-unchanged {
+  color: #374151;
+}
+
+/* File drop zone */
+.dropzone {
+  @apply border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-colors;
+}
+
+.dropzone:hover,
+.dropzone-active {
+  @apply border-blue-500 bg-blue-50;
+}
+
+.dropzone-reject {
+  @apply border-red-500 bg-red-50;
+}

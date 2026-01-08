@@ -1,0 +1,108 @@
+# Legislative Redline Development Docker Compose
+# Usage: docker compose up -d
+#
+# Access via Traefik (recommended):
+#   Frontend: http://redline.localhost
+#   Backend:  http://redline-api.localhost
+#
+# Direct port access (fallback):
+#   Frontend: http://localhost:${FRONTEND_PORT:-5176}
+#   Backend:  http://localhost:${BACKEND_PORT:-8004}
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: redline_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localdev}
+      POSTGRES_DB: ${POSTGRES_DB:-redline_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5438}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-redline_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: redline_backend
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-localdev}
+      - POSTGRES_SERVER=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-redline_db}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:5176,http://redline.localhost,http://redline-api.localhost}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - GOVINFO_API_KEY=${GOVINFO_API_KEY:-}
+      - DOCUMENT_RETENTION_HOURS=${DOCUMENT_RETENTION_HOURS:-24}
+      - STATUTE_CACHE_DAYS=${STATUTE_CACHE_DAYS:-7}
+    ports:
+      - "${BACKEND_PORT:-8004}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - upload_data:/app/uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.redline-api.rule=Host(`redline-api.localhost`)"
+      - "traefik.http.services.redline-api.loadbalancer.server.port=8000"
+    networks:
+      - traefik-dev
+      - default
+
+  # React Frontend (Development)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: redline_frontend
+    restart: unless-stopped
+    environment:
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://redline-api.localhost}
+    ports:
+      - "${FRONTEND_PORT:-5176}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.redline.rule=Host(`redline.localhost`)"
+      - "traefik.http.services.redline.loadbalancer.server.port=5173"
+    networks:
+      - traefik-dev
+      - default
+
+volumes:
+  postgres_data:
+    name: redline_postgres_data
+  upload_data:
+    name: redline_upload_data
+
+networks:
+  traefik-dev:
+    external: true
