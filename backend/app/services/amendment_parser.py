@@ -201,6 +201,44 @@ class AmendmentParser:
             r'strike\s+out\s+' + QUOTE_PATTERN,
             re.IGNORECASE
         ),
+        # "by striking 'X' at the end" - strikes specific text at end of provision
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+at\s+the\s+end(?!\s+and)',
+            re.IGNORECASE
+        ),
+    ]
+
+    # Strike at End and Insert patterns (common in real bills)
+    STRIKE_END_INSERT_PATTERNS = [
+        # "by striking the period at the end and inserting '; or'"
+        re.compile(
+            r'(?:by\s+)?striking\s+the\s+(\w+)\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
+            re.IGNORECASE
+        ),
+        # "by striking 'X' at the end and inserting 'Y'"
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
+            re.IGNORECASE
+        ),
+    ]
+
+    # Subparagraph-targeted amendment patterns
+    SUBPARAGRAPH_PATTERNS = [
+        # "on subparagraph (D), by striking 'X' at the end"
+        re.compile(
+            r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)[,\s]+(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+at\s+the\s+end',
+            re.IGNORECASE
+        ),
+        # "on subparagraph (E)(ii), by striking the period at the end and inserting '; or'"
+        re.compile(
+            r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)(?:\s*\(([ivxlcdm0-9]+)\))?[,\s]+(?:by\s+)?striking\s+(?:the\s+)?(\w+)\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
+            re.IGNORECASE
+        ),
+        # "by striking subparagraph (E) and inserting the following:"
+        re.compile(
+            r'(?:by\s+)?striking\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?(.+?)(?=\n\n|\Z|"\.|"\s*$)',
+            re.IGNORECASE | re.DOTALL
+        ),
     ]
 
     # Redesignate patterns
@@ -218,6 +256,68 @@ class AmendmentParser:
         re.IGNORECASE
     )
 
+    # Pattern to detect if text is definitional (not an actual amendment)
+    DEFINITIONAL_PATTERNS = [
+        re.compile(r'\(as\s+defined\s+in\s+(?:section|paragraph)', re.IGNORECASE),
+        re.compile(r'has\s+the\s+meaning\s+given', re.IGNORECASE),
+        re.compile(r'the\s+term\s+["\'].+?["\']\s+means', re.IGNORECASE),
+        re.compile(r'for\s+purposes\s+of\s+this', re.IGNORECASE),
+        re.compile(r'under\s+(?:section|paragraph|subparagraph)', re.IGNORECASE),
+    ]
+
+    # Pattern to detect actual amendment language
+    AMENDMENT_INDICATOR_PATTERNS = [
+        re.compile(r'is\s+amended', re.IGNORECASE),
+        re.compile(r'are\s+amended', re.IGNORECASE),
+        re.compile(r'is\s+hereby\s+amended', re.IGNORECASE),
+        re.compile(r'shall\s+be\s+amended', re.IGNORECASE),
+        re.compile(r'by\s+striking', re.IGNORECASE),
+        re.compile(r'by\s+inserting', re.IGNORECASE),
+        re.compile(r'by\s+adding', re.IGNORECASE),
+        re.compile(r'by\s+redesignating', re.IGNORECASE),
+    ]
+
+    # Pattern to detect numbered amendment lists: (1) by..., (2) by...
+    NUMBERED_AMENDMENT_PATTERN = re.compile(
+        r'is\s+amended[—\-:\s]+(?:\n\s*)?(\(\d+\)[^(]+(?:\(\d+\)[^(]+)*)',
+        re.IGNORECASE | re.DOTALL
+    )
+
+    def is_definitional_reference(self, text: str) -> bool:
+        """
+        Check if text is a definitional reference rather than an actual amendment.
+
+        Args:
+            text: Context text to analyze
+
+        Returns:
+            True if text appears to be definitional, False if it may contain amendments
+        """
+        # Check for definitional patterns
+        for pattern in self.DEFINITIONAL_PATTERNS:
+            if pattern.search(text):
+                # But also check if there's amendment language
+                for amend_pattern in self.AMENDMENT_INDICATOR_PATTERNS:
+                    if amend_pattern.search(text):
+                        return False  # Has amendment language, not just definitional
+                return True
+        return False
+
+    def is_amendment_context(self, text: str) -> bool:
+        """
+        Check if text contains actual amendment instructions.
+
+        Args:
+            text: Context text to analyze
+
+        Returns:
+            True if text appears to contain amendment instructions
+        """
+        for pattern in self.AMENDMENT_INDICATOR_PATTERNS:
+            if pattern.search(text):
+                return True
+        return False
+
     def parse(self, text: str) -> AmendmentParseResult:
         """
         Parse amendment instructions from text.
@@ -234,10 +334,22 @@ class AmendmentParser:
                 error_message="No text provided"
             )
 
+        # Check if this is just a definitional reference
+        if self.is_definitional_reference(text) and not self.is_amendment_context(text):
+            return AmendmentParseResult(
+                success=False,
+                error_message="Text appears to be a definitional reference, not an amendment"
+            )
+
         amendments = []
+
+        # First, try to parse numbered amendment lists (most common in real bills)
+        amendments.extend(self._parse_numbered_amendments(text))
 
         # Try each pattern type
         amendments.extend(self._parse_strike_insert(text))
+        amendments.extend(self._parse_strike_end_insert(text))
+        amendments.extend(self._parse_subparagraph_amendments(text))
         amendments.extend(self._parse_insert_after(text))
         amendments.extend(self._parse_insert_before(text))
         amendments.extend(self._parse_read_as_follows(text))
@@ -245,6 +357,9 @@ class AmendmentParser:
         amendments.extend(self._parse_add_at_beginning(text))
         amendments.extend(self._parse_strike_only(text))
         amendments.extend(self._parse_redesignate(text))
+
+        # Deduplicate amendments (some may be captured by multiple patterns)
+        amendments = self._deduplicate_amendments(amendments)
 
         # If no patterns matched, try to detect amendment type from keywords
         if not amendments:
@@ -264,6 +379,17 @@ class AmendmentParser:
             success=len(amendments) > 0
         )
 
+    def _deduplicate_amendments(self, amendments: List[ParsedAmendment]) -> List[ParsedAmendment]:
+        """Remove duplicate amendments based on raw_instruction."""
+        seen = set()
+        unique = []
+        for amendment in amendments:
+            key = (amendment.amendment_type, amendment.text_to_strike, amendment.text_to_insert)
+            if key not in seen:
+                seen.add(key)
+                unique.append(amendment)
+        return unique
+
     def _parse_strike_insert(self, text: str) -> List[ParsedAmendment]:
         """Parse strike-and-insert amendments."""
         amendments = []
@@ -276,6 +402,161 @@ class AmendmentParser:
                     raw_instruction=match.group(0),
                     confidence=0.9
                 ))
+        return amendments
+
+    def _parse_numbered_amendments(self, text: str) -> List[ParsedAmendment]:
+        """
+        Parse numbered amendment lists like:
+        is amended—
+        (1) on subparagraph (D), by striking "or" at the end;
+        (2) on subparagraph (E)(ii), by striking the period at the end and inserting "; or"; and
+        (3) by adding at the end the following: "(F) otherwise refinancing indebtedness."
+        """
+        amendments = []
+
+        # Find numbered amendment blocks
+        match = self.NUMBERED_AMENDMENT_PATTERN.search(text)
+        if match:
+            numbered_text = match.group(1)
+            # Split by numbered items: (1), (2), (3), etc.
+            items = re.split(r'\(\d+\)\s*', numbered_text)
+            items = [item.strip() for item in items if item.strip()]
+
+            for item in items:
+                # Parse each numbered item individually
+                item_amendments = self._parse_single_amendment_item(item)
+                amendments.extend(item_amendments)
+
+        return amendments
+
+    def _parse_single_amendment_item(self, item: str) -> List[ParsedAmendment]:
+        """Parse a single amendment item from a numbered list."""
+        amendments = []
+
+        # Pattern: "on subparagraph (X), by striking 'Y' at the end"
+        strike_at_end_match = re.search(
+            r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)[,\s]+(?:by\s+)?striking\s+["\']([^"\']+)["\'](?:\s+at\s+the\s+end)?',
+            item, re.IGNORECASE
+        )
+        if strike_at_end_match:
+            amendments.append(ParsedAmendment(
+                amendment_type=AmendmentType.STRIKE,
+                text_to_strike=strike_at_end_match.group(2),
+                target_section=f"subparagraph ({strike_at_end_match.group(1)})",
+                raw_instruction=item,
+                confidence=0.9
+            ))
+            return amendments
+
+        # Pattern: "on subparagraph (X), by striking the period at the end and inserting '; or'"
+        strike_word_insert_match = re.search(
+            r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)(?:\s*\(([ivxlcdm0-9]+)\))?[,\s]+(?:by\s+)?striking\s+(?:the\s+)?(\w+)\s+at\s+the\s+end\s+and\s+inserting\s+["\']([^"\']+)["\']',
+            item, re.IGNORECASE
+        )
+        if strike_word_insert_match:
+            subpara = strike_word_insert_match.group(1)
+            clause = strike_word_insert_match.group(2)
+            word_to_strike = strike_word_insert_match.group(3)
+            text_to_insert = strike_word_insert_match.group(4)
+            target = f"subparagraph ({subpara})" + (f"({clause})" if clause else "")
+
+            # Map common words to actual characters
+            strike_text = {"period": ".", "comma": ",", "semicolon": ";"}.get(word_to_strike.lower(), word_to_strike)
+
+            amendments.append(ParsedAmendment(
+                amendment_type=AmendmentType.STRIKE_INSERT,
+                text_to_strike=strike_text,
+                text_to_insert=text_to_insert,
+                target_section=target,
+                raw_instruction=item,
+                confidence=0.9
+            ))
+            return amendments
+
+        # Pattern: "by adding at the end the following: '(F) ...'""
+        add_at_end_match = re.search(
+            r'(?:by\s+)?adding\s+at\s+the\s+end\s+(?:the\s+following[:\s]+)?["\']?(.+?)["\']?\s*[\.;]?\s*$',
+            item, re.IGNORECASE | re.DOTALL
+        )
+        if add_at_end_match:
+            amendments.append(ParsedAmendment(
+                amendment_type=AmendmentType.ADD_AT_END,
+                text_to_insert=add_at_end_match.group(1).strip().strip('"\''),
+                raw_instruction=item,
+                confidence=0.9
+            ))
+            return amendments
+
+        # Pattern: "by striking subparagraph (E) and inserting the following:"
+        strike_subpara_match = re.search(
+            r'(?:by\s+)?striking\s+(?:subparagraph|paragraph)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?["\']?(.+?)["\']?\s*$',
+            item, re.IGNORECASE | re.DOTALL
+        )
+        if strike_subpara_match:
+            amendments.append(ParsedAmendment(
+                amendment_type=AmendmentType.STRIKE_INSERT,
+                text_to_strike=f"subparagraph ({strike_subpara_match.group(1)})",
+                text_to_insert=strike_subpara_match.group(2).strip().strip('"\''),
+                raw_instruction=item,
+                confidence=0.85
+            ))
+            return amendments
+
+        return amendments
+
+    def _parse_strike_end_insert(self, text: str) -> List[ParsedAmendment]:
+        """Parse strike-at-end-and-insert amendments."""
+        amendments = []
+        for pattern in self.STRIKE_END_INSERT_PATTERNS:
+            for match in pattern.finditer(text):
+                groups = match.groups()
+                if len(groups) == 2:
+                    # "by striking the period at the end and inserting '; or'"
+                    word_to_strike = groups[0]
+                    text_to_insert = groups[1]
+                    # Map common words to characters
+                    strike_text = {"period": ".", "comma": ",", "semicolon": ";"}.get(word_to_strike.lower(), word_to_strike)
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE_INSERT,
+                        text_to_strike=strike_text,
+                        text_to_insert=text_to_insert.strip(),
+                        raw_instruction=match.group(0),
+                        confidence=0.9
+                    ))
+        return amendments
+
+    def _parse_subparagraph_amendments(self, text: str) -> List[ParsedAmendment]:
+        """Parse amendments that target specific subparagraphs."""
+        amendments = []
+        for pattern in self.SUBPARAGRAPH_PATTERNS:
+            for match in pattern.finditer(text):
+                groups = match.groups()
+                if len(groups) >= 2:
+                    subpara = groups[0]
+                    if len(groups) == 2:
+                        # Simple subparagraph strike
+                        amendments.append(ParsedAmendment(
+                            amendment_type=AmendmentType.STRIKE,
+                            text_to_strike=groups[1],
+                            target_section=f"subparagraph ({subpara})",
+                            raw_instruction=match.group(0),
+                            confidence=0.9
+                        ))
+                    elif len(groups) >= 4:
+                        # Strike word and insert
+                        clause = groups[1] if groups[1] else ""
+                        word_to_strike = groups[2]
+                        text_to_insert = groups[3]
+                        strike_text = {"period": ".", "comma": ",", "semicolon": ";"}.get(word_to_strike.lower(), word_to_strike)
+                        target = f"subparagraph ({subpara})" + (f"({clause})" if clause else "")
+                        amendments.append(ParsedAmendment(
+                            amendment_type=AmendmentType.STRIKE_INSERT,
+                            text_to_strike=strike_text,
+                            text_to_insert=text_to_insert.strip(),
+                            target_section=target,
+                            raw_instruction=match.group(0),
+                            confidence=0.9
+                        ))
         return amendments
 
     def _parse_insert_after(self, text: str) -> List[ParsedAmendment]:

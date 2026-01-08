@@ -87,6 +87,7 @@ async def generate_comparisons(
 
     try:
         comparisons_created = 0
+        skipped_definitional = 0
 
         for citation in document.citations:
             # Get the statute text
@@ -100,6 +101,26 @@ async def generate_comparisons(
 
             # Parse amendments from the citation context
             context_text = citation.context_text or ""
+
+            # Check if this is a definitional reference (not an actual amendment)
+            if amendment_parser.is_definitional_reference(context_text) and not amendment_parser.is_amendment_context(context_text):
+                logger.info(f"Skipping definitional reference for {citation.canonical_citation}")
+                skipped_definitional += 1
+                # Still create a comparison record but mark it as definitional
+                comparison = Comparison(
+                    document_id=document.id,
+                    citation_id=citation.id,
+                    citation_text=citation.canonical_citation,
+                    amendment_type=AmendmentType.UNKNOWN,
+                    amendment_instruction="(Definitional reference - no amendment)",
+                    original_text=statute.full_text[:2000],  # Truncate for definitional refs
+                    amended_text=statute.full_text[:2000],
+                    diff_html=f'<div class="redline-container"><p class="redline-note">This citation is a definitional reference. The statute is shown for context but no amendments were detected.</p><div class="redline-content">{statute.full_text[:2000]}...</div></div>',
+                )
+                db.add(comparison)
+                comparisons_created += 1
+                continue
+
             parse_result = amendment_parser.parse(context_text)
 
             # Determine amendment type and apply changes
@@ -152,12 +173,13 @@ async def generate_comparisons(
         document.status = DocumentStatus.COMPLETED
         await db.commit()
 
-        logger.info(f"Generated {comparisons_created} comparisons for document {document_id}")
+        logger.info(f"Generated {comparisons_created} comparisons for document {document_id} ({skipped_definitional} definitional references)")
 
         return {
             "document_id": document.id,
-            "message": f"Generated {comparisons_created} comparisons",
-            "comparisons_count": comparisons_created
+            "message": f"Generated {comparisons_created} comparisons ({skipped_definitional} definitional references)",
+            "comparisons_count": comparisons_created,
+            "definitional_references": skipped_definitional
         }
 
     except Exception as e:
