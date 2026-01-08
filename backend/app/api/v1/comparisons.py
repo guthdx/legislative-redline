@@ -15,9 +15,15 @@ from sqlalchemy.orm import selectinload
 from app.db.session import get_db
 from app.models import Document, DocumentStatus, Citation, Comparison, AmendmentType
 from app.schemas import ComparisonListResponse, ComparisonBase, CompareRequest
+from app.services import AmendmentParser, AmendmentApplier
+from app.services.amendment_parser import AmendmentType as ParsedAmendmentType
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["comparisons"])
+
+# Initialize services
+amendment_parser = AmendmentParser()
+amendment_applier = AmendmentApplier()
 
 
 @router.post("/{document_id}/compare")
@@ -91,21 +97,48 @@ async def generate_comparisons(
             if not statute:
                 continue
 
-            # TODO: Implement actual amendment parsing and diff generation
-            # For now, create placeholder comparisons
+            # Parse amendments from the citation context
+            context_text = citation.context_text or ""
+            parse_result = amendment_parser.parse(context_text)
 
-            # Detect amendment type from context
-            amendment_type = _detect_amendment_type(citation.context_text or "")
+            # Determine amendment type and apply changes
+            original_text = statute.full_text
+            amended_text = original_text
+            amendment_type = AmendmentType.UNKNOWN
+            amendment_instruction = ""
 
-            # Create placeholder comparison
+            if parse_result.success and parse_result.amendments:
+                # Use the first valid amendment found
+                for parsed in parse_result.amendments:
+                    if parsed.is_valid:
+                        # Map parsed type to model type
+                        amendment_type = _map_amendment_type(parsed.amendment_type)
+                        amendment_instruction = parsed.raw_instruction
+
+                        # Apply the amendment to get amended text
+                        amended_text, success = amendment_applier.apply(original_text, parsed)
+                        if success:
+                            logger.info(f"Applied {amendment_type.value} amendment for {citation.canonical_citation}")
+                        else:
+                            logger.warning(f"Could not apply amendment for {citation.canonical_citation}")
+                        break
+            else:
+                # Fallback to keyword detection
+                amendment_type = _detect_amendment_type(context_text)
+
+            # Generate diff HTML
+            diff_html = _generate_diff_html(original_text, amended_text, amendment_type)
+
+            # Create comparison record
             comparison = Comparison(
                 document_id=document.id,
                 citation_id=citation.id,
                 citation_text=citation.canonical_citation,
                 amendment_type=amendment_type,
-                original_text=statute.full_text,
-                amended_text=statute.full_text,  # Placeholder - will be modified
-                diff_html=_generate_placeholder_diff(statute.full_text, amendment_type),
+                amendment_instruction=amendment_instruction[:500] if amendment_instruction else None,
+                original_text=original_text,
+                amended_text=amended_text,
+                diff_html=diff_html,
             )
             db.add(comparison)
             comparisons_created += 1
@@ -178,8 +211,24 @@ async def get_comparison_results(
 from app.models import Statute
 
 
+def _map_amendment_type(parsed_type: ParsedAmendmentType) -> AmendmentType:
+    """Map parsed amendment type to model amendment type."""
+    mapping = {
+        ParsedAmendmentType.STRIKE_INSERT: AmendmentType.STRIKE_INSERT,
+        ParsedAmendmentType.INSERT_AFTER: AmendmentType.INSERT_AFTER,
+        ParsedAmendmentType.INSERT_BEFORE: AmendmentType.INSERT_AFTER,  # Map to INSERT_AFTER
+        ParsedAmendmentType.READ_AS_FOLLOWS: AmendmentType.READ_AS_FOLLOWS,
+        ParsedAmendmentType.ADD_AT_END: AmendmentType.ADD_AT_END,
+        ParsedAmendmentType.ADD_AT_BEGINNING: AmendmentType.ADD_AT_END,  # Map to ADD_AT_END
+        ParsedAmendmentType.STRIKE: AmendmentType.STRIKE,
+        ParsedAmendmentType.REDESIGNATE: AmendmentType.STRIKE_INSERT,  # Treat as strike/insert
+        ParsedAmendmentType.UNKNOWN: AmendmentType.UNKNOWN,
+    }
+    return mapping.get(parsed_type, AmendmentType.UNKNOWN)
+
+
 def _detect_amendment_type(context: str) -> AmendmentType:
-    """Detect the amendment type from surrounding context."""
+    """Detect the amendment type from surrounding context (fallback)."""
     context_lower = context.lower()
 
     if "striking" in context_lower and "inserting" in context_lower:
@@ -196,20 +245,45 @@ def _detect_amendment_type(context: str) -> AmendmentType:
         return AmendmentType.UNKNOWN
 
 
-def _generate_placeholder_diff(original_text: str, amendment_type: AmendmentType) -> str:
-    """Generate placeholder diff HTML."""
-    # In full implementation, this will use diff-match-patch
+def _generate_diff_html(original_text: str, amended_text: str, amendment_type: AmendmentType) -> str:
+    """
+    Generate diff HTML showing changes between original and amended text.
 
-    if amendment_type == AmendmentType.UNKNOWN:
-        return f'<span class="redline-unchanged">{original_text}</span>'
+    Uses simple comparison for now - Phase 5 will use diff-match-patch.
+    """
+    import html
 
-    # For now, just wrap the text to show it's been processed
+    # Escape HTML in text
+    original_escaped = html.escape(original_text)
+    amended_escaped = html.escape(amended_text)
+
+    # If texts are the same, show as unchanged
+    if original_text == amended_text:
+        if amendment_type == AmendmentType.UNKNOWN:
+            return f'<div class="redline-unchanged">{original_escaped[:500]}{"..." if len(original_escaped) > 500 else ""}</div>'
+        else:
+            return f'''
+<div class="redline-section">
+    <p class="redline-note">Amendment type detected: {amendment_type.value}</p>
+    <p class="redline-note">Could not apply amendment to statute text.</p>
+    <div class="redline-unchanged">{original_escaped[:500]}{"..." if len(original_escaped) > 500 else ""}</div>
+</div>
+'''
+
+    # Simple diff: show deleted (original) and inserted (new) sections
+    # This is a basic implementation - Phase 5 will use proper diff algorithm
     return f'''
 <div class="redline-section">
-    <p class="text-sm text-gray-500 mb-2">Amendment type: {amendment_type.value}</p>
-    <div class="redline-content">
-        <span class="redline-unchanged">{original_text[:200]}...</span>
-        <span class="text-gray-400">[Full diff generation pending API integration]</span>
+    <p class="redline-note">Amendment type: {amendment_type.value}</p>
+    <div class="redline-comparison">
+        <div class="redline-deleted">
+            <span class="redline-label">Original:</span>
+            <del>{original_escaped[:1000]}{"..." if len(original_escaped) > 1000 else ""}</del>
+        </div>
+        <div class="redline-inserted">
+            <span class="redline-label">Amended:</span>
+            <ins>{amended_escaped[:1000]}{"..." if len(amended_escaped) > 1000 else ""}</ins>
+        </div>
     </div>
 </div>
 '''

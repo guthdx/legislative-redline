@@ -7,6 +7,13 @@ from app.services.statute_fetcher import (
     GovInfoFetcher,
     ECFRFetcher,
 )
+from app.services.amendment_parser import (
+    AmendmentParser,
+    AmendmentApplier,
+    ParsedAmendment,
+    AmendmentParseResult,
+    AmendmentType,
+)
 
 __all__ = [
     "DocumentParser",
@@ -18,4 +25,9 @@ __all__ = [
     "FetchedStatute",
     "GovInfoFetcher",
     "ECFRFetcher",
+    "AmendmentParser",
+    "AmendmentApplier",
+    "ParsedAmendment",
+    "AmendmentParseResult",
+    "AmendmentType",
 ]
