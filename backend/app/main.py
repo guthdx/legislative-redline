@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.v1 import health
+from app.api.v1 import documents, citations, comparisons
 
 
 @asynccontextmanager
@@ -58,6 +59,9 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, prefix=settings.API_V1_STR, tags=["health"])
+app.include_router(documents.router, prefix=settings.API_V1_STR)
+app.include_router(citations.router, prefix=settings.API_V1_STR)
+app.include_router(comparisons.router, prefix=settings.API_V1_STR)
 
 
 @app.get("/")

@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.db.session import Base
 
 # Import all models here for autogenerate to detect them
-# from app.models import Document, Citation, Statute, Comparison
+from app.models import Document, Citation, Statute, Comparison
 
 # this is the Alembic Config object
 config = context.config

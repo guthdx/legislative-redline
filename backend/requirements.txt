@@ -1,31 +1,30 @@
-# FastAPI and ASGI
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
-
-# Database
-sqlalchemy==2.0.36
-psycopg2-binary==2.9.10
-alembic==1.14.0
-asyncpg==0.30.0
-
-# Pydantic
-pydantic==2.10.3
-pydantic-settings==2.6.1
-
-# Document Parsing
-pymupdf==1.24.10
-python-docx==1.1.2
-
-# HTTP Client (for external APIs)
-httpx==0.27.2
-
-# Text Diffing
-diff-match-patch==20230430
-
-# Utilities
-python-multipart==0.0.17
-python-dotenv==1.0.1
-
-# HTML parsing (for statute text extraction)
-beautifulsoup4==4.12.3
-lxml==5.3.0
+alembic==1.17.2
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+asyncpg==0.31.0
+certifi==2026.1.4
+click==8.3.1
+diff-match-patch==20241021
+fastapi==0.128.0
+greenlet==3.3.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.11
+lxml==6.0.2
+Mako==1.3.10
+MarkupSafe==3.0.3
+psycopg2-binary==2.9.11
+pydantic==2.12.5
+pydantic-settings==2.12.0
+pydantic_core==2.41.5
+PyMuPDF==1.26.7
+python-docx==1.2.0
+python-dotenv==1.2.1
+python-multipart==0.0.21
+SQLAlchemy==2.0.45
+starlette==0.50.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+uvicorn==0.40.0
