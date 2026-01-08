@@ -14,9 +14,13 @@ from sqlalchemy import select
 from app.db.session import get_db
 from app.models import Citation, Statute, StatuteSource
 from app.schemas import CitationFetchResponse
+from app.services import StatuteFetcherService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/citations", tags=["citations"])
+
+# Initialize the statute fetcher service
+statute_fetcher = StatuteFetcherService()
 
 
 @router.post("/{citation_id}/fetch-statute", response_model=CitationFetchResponse)
@@ -67,44 +71,48 @@ async def fetch_statute_for_citation(
             message="Statute retrieved from cache"
         )
 
-    # TODO: Implement actual API calls to govinfo.gov and eCFR.gov
-    # For now, create a placeholder statute
-
     try:
+        # Fetch from official API
+        fetched = await statute_fetcher.fetch(
+            citation_type=citation.citation_type.value,
+            title=citation.title,
+            section=citation.section
+        )
+
+        if not fetched.success:
+            # Return error but don't fail - citation stays unfetched
+            logger.warning(f"Failed to fetch statute for {citation_id}: {fetched.error_message}")
+            return CitationFetchResponse(
+                citation_id=citation.id,
+                statute_fetched=False,
+                statute_heading=None,
+                message=f"Could not fetch statute: {fetched.error_message}"
+            )
+
         # Determine source based on citation type
         if citation.citation_type.value == "usc":
             source = StatuteSource.GOVINFO
-            source_url = f"https://www.govinfo.gov/link/uscode/{citation.title}/{citation.section}"
-            # Placeholder text - will be replaced with actual API call
-            full_text = f"[Placeholder: {citation.title} U.S.C. § {citation.section}]\n\nThis is placeholder text. In the full implementation, this will be fetched from govinfo.gov API."
-            heading = f"Section {citation.section}"
         elif citation.citation_type.value == "cfr":
             source = StatuteSource.ECFR
-            source_url = f"https://www.ecfr.gov/current/title-{citation.title}/section-{citation.section}"
-            full_text = f"[Placeholder: {citation.title} C.F.R. § {citation.section}]\n\nThis is placeholder text. In the full implementation, this will be fetched from eCFR.gov API."
-            heading = f"Section {citation.section}"
         else:
             source = StatuteSource.MANUAL
-            source_url = None
-            full_text = f"[Public Law {citation.title}-{citation.section}]\n\nPublic law text is not available through automated APIs."
-            heading = f"Public Law {citation.title}-{citation.section}"
 
-        # Create or update statute
+        # Create or update statute in cache
         if existing_statute:
-            existing_statute.full_text = full_text
-            existing_statute.heading = heading
+            existing_statute.full_text = fetched.full_text
+            existing_statute.heading = fetched.heading
             existing_statute.source = source
-            existing_statute.source_url = source_url
+            existing_statute.source_url = fetched.source_url
             statute = existing_statute
         else:
             statute = Statute(
                 citation_type=citation.citation_type.value,
                 title=citation.title,
                 section=citation.section,
-                full_text=full_text,
-                heading=heading,
+                full_text=fetched.full_text,
+                heading=fetched.heading,
                 source=source,
-                source_url=source_url,
+                source_url=fetched.source_url,
             )
             db.add(statute)
             await db.flush()
@@ -114,13 +122,13 @@ async def fetch_statute_for_citation(
         citation.statute_fetched = True
         await db.commit()
 
-        logger.info(f"Statute fetched for citation {citation_id}")
+        logger.info(f"Statute fetched for citation {citation_id} from {source.value}")
 
         return CitationFetchResponse(
             citation_id=citation.id,
             statute_fetched=True,
-            statute_heading=heading,
-            message="Statute fetched successfully (placeholder - API integration pending)"
+            statute_heading=fetched.heading,
+            message=f"Statute fetched successfully from {source.value}"
         )
 
     except Exception as e:
