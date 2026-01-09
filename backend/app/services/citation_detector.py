@@ -78,7 +78,14 @@ class CitationDetector:
     ]
 
     # Context window size (characters before/after citation)
-    CONTEXT_WINDOW = 500
+    CONTEXT_WINDOW = 500  # Default fallback
+    MAX_CONTEXT_FORWARD = 3000  # Max forward scan for amendment block end
+
+    # Patterns that mark the start of a new section/subsection
+    SECTION_BOUNDARY_PATTERN = re.compile(
+        r'\n\s*(SEC\.\s*\d+\.|\([a-z]\)\s+[A-Z]|\[\s*Option|\n\n\([a-z]\)\s)',
+        re.IGNORECASE
+    )
 
     def detect_all(self, text: str) -> List[DetectedCitation]:
         """
@@ -191,10 +198,59 @@ class CitationDetector:
         return citations
 
     def _get_context(self, text: str, start: int, end: int) -> str:
-        """Get text context around a citation."""
-        context_start = max(0, start - self.CONTEXT_WINDOW)
-        context_end = min(len(text), end + self.CONTEXT_WINDOW)
-        return text[context_start:context_end]
+        """
+        Get text context around a citation, intelligently finding amendment boundaries.
+
+        For amendment context, we need to capture:
+        1. The beginning of the sentence/paragraph containing the citation
+        2. All amendment instructions that follow (could be a numbered list)
+        3. Stop at the next major section boundary
+        """
+        # Find the start of the line/paragraph containing the citation
+        # Look back for newline followed by section marker or start of subsection
+        context_start = start
+
+        # Look back up to 200 chars to find start of the sentence/paragraph
+        lookback_start = max(0, start - 200)
+        lookback_text = text[lookback_start:start]
+
+        # Find the last newline or section marker
+        last_newline = lookback_text.rfind('\n')
+        if last_newline != -1:
+            context_start = lookback_start + last_newline + 1
+        else:
+            context_start = lookback_start
+
+        # For the end, look forward for the next section boundary
+        # This captures multi-line amendment blocks
+        forward_text = text[end:end + self.MAX_CONTEXT_FORWARD]
+
+        # Look for boundary patterns
+        boundary_match = self.SECTION_BOUNDARY_PATTERN.search(forward_text)
+
+        if boundary_match:
+            # Found a boundary - include text up to it
+            context_end = end + boundary_match.start()
+        else:
+            # No boundary found - use a larger window but look for double newline
+            double_newline = forward_text.find('\n\n')
+            if double_newline != -1 and double_newline < 1500:
+                # Check if there's more amendment text after double newline
+                after_newline = forward_text[double_newline:double_newline + 100]
+                if re.match(r'\s*\(\d+\)\s+', after_newline):
+                    # It's a numbered list item - continue
+                    second_double = forward_text.find('\n\n', double_newline + 2)
+                    if second_double != -1:
+                        context_end = end + second_double
+                    else:
+                        context_end = min(len(text), end + self.MAX_CONTEXT_FORWARD)
+                else:
+                    context_end = end + double_newline
+            else:
+                # Use extended window
+                context_end = min(len(text), end + 1500)
+
+        return text[context_start:context_end].strip()
 
     def _deduplicate(self, citations: List[DetectedCitation]) -> List[DetectedCitation]:
         """Remove duplicate citations (same type, title, section at overlapping positions)."""

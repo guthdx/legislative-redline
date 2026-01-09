@@ -165,53 +165,122 @@ class GovInfoFetcher(StatuteFetcher):
             )
 
     def _parse_usc_html(self, html: str) -> Tuple[Optional[str], str]:
-        """Parse USC HTML from govinfo.gov and extract heading and text."""
+        """
+        Parse USC HTML from govinfo.gov and extract ONLY operative statute text.
+
+        GovInfo HTML structure:
+        - <!-- field-start:statute --> marks start of operative law
+        - <!-- field-end:statute --> marks end of operative law
+        - Everything after (sourcecredit, notes, amendments) is historical metadata
+        """
         soup = BeautifulSoup(html, 'html.parser')
 
         # Try to find the section heading
         heading = None
-        heading_elem = soup.find('h3', class_='section-head') or soup.find('h2')
+        heading_elem = soup.find('h3', class_='section-head')
         if heading_elem:
             heading = heading_elem.get_text(strip=True)
 
-        # Try to find the main content
-        # GovInfo uses different structures, try multiple selectors
-        content = None
+        # Extract ONLY the operative statute text between the HTML comments
+        # The comments mark: <!-- field-start:statute --> and <!-- field-end:statute -->
+        statute_text = self._extract_statute_section(html)
 
-        # Try common content containers
-        for selector in [
-            'div.section-content',
-            'div.content',
-            'div#content',
-            'article',
-            'main',
-            'body'
-        ]:
-            content = soup.select_one(selector)
-            if content:
-                break
+        if statute_text:
+            # Parse the extracted statute section for structured output
+            statute_soup = BeautifulSoup(statute_text, 'html.parser')
+            formatted_text = self._format_statute_text(statute_soup)
+            return heading, formatted_text
 
-        if not content:
-            content = soup.body or soup
+        # Fallback: try to find content by class names (less reliable)
+        return heading, self._fallback_parse(soup)
 
-        # Extract text, preserving some structure
-        text_parts = []
-        for elem in content.find_all(['p', 'div', 'span', 'li'], recursive=True):
+    def _extract_statute_section(self, html: str) -> Optional[str]:
+        """Extract only the operative statute text between field markers."""
+        # Look for the statute section markers in the HTML
+        start_marker = '<!-- field-start:statute -->'
+        end_marker = '<!-- field-end:statute -->'
+
+        start_idx = html.find(start_marker)
+        end_idx = html.find(end_marker)
+
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            # Extract content between markers
+            return html[start_idx + len(start_marker):end_idx]
+
+        return None
+
+    def _format_statute_text(self, soup: BeautifulSoup) -> str:
+        """
+        Format statute text with clear hierarchy for human readability.
+
+        Output format:
+        (a) IN GENERAL
+            (1) First paragraph text...
+            (2) Second paragraph text...
+                (A) Subparagraph text...
+        """
+        lines = []
+
+        for elem in soup.find_all(['h4', 'p'], recursive=True):
+            class_name = ' '.join(elem.get('class', []))
             text = elem.get_text(separator=' ', strip=True)
-            if text and len(text) > 10:  # Skip very short fragments
-                text_parts.append(text)
 
-        # Deduplicate while preserving order
-        seen = set()
-        unique_parts = []
-        for part in text_parts:
-            if part not in seen:
-                seen.add(part)
-                unique_parts.append(part)
+            if not text:
+                continue
 
-        full_text = '\n\n'.join(unique_parts)
+            # Determine indentation based on element type
+            if 'subsection-head' in class_name:
+                # Main subsection header: (a) In general
+                lines.append(f"\n{text}")
+            elif 'paragraph-head' in class_name:
+                # Paragraph header: (1) Eligibility requirements
+                lines.append(f"\n    {text}")
+            elif 'subparagraph-head' in class_name:
+                # Subparagraph header: (A) Special rule
+                lines.append(f"\n        {text}")
+            elif 'statutory-body' in class_name and '1em' in class_name:
+                # Paragraph body text (1em indent)
+                lines.append(f"    {text}")
+            elif 'statutory-body' in class_name and '2em' in class_name:
+                # Subparagraph body text (2em indent)
+                lines.append(f"        {text}")
+            elif 'statutory-body' in class_name and '3em' in class_name:
+                # Clause body text (3em indent)
+                lines.append(f"            {text}")
+            elif 'statutory-body' in class_name:
+                # Default statutory body
+                lines.append(f"    {text}")
+            elif elem.name == 'p' and text:
+                # Generic paragraph
+                lines.append(f"    {text}")
 
-        return heading, self._clean_text(full_text)
+        return '\n'.join(lines).strip()
+
+    def _fallback_parse(self, soup: BeautifulSoup) -> str:
+        """Fallback parser when field markers aren't found."""
+        # Try to find statute content by class names
+        text_parts = []
+
+        # Look for elements with statute-related classes
+        for class_pattern in ['subsection-head', 'paragraph-head', 'statutory-body']:
+            for elem in soup.find_all(class_=lambda c: c and class_pattern in ' '.join(c) if c else False):
+                text = elem.get_text(separator=' ', strip=True)
+                if text and len(text) > 10:
+                    text_parts.append(text)
+
+        if text_parts:
+            return '\n\n'.join(text_parts)
+
+        # Last resort: get body text but exclude known junk
+        body = soup.body or soup
+        for junk in body.find_all(['script', 'style', 'nav', 'footer']):
+            junk.decompose()
+
+        # Also remove source-credit and notes sections
+        for elem in body.find_all(class_=lambda c: c and any(x in ' '.join(c) for x in ['source-credit', 'note']) if c else False):
+            elem.decompose()
+
+        return self._clean_text(body.get_text(separator='\n', strip=True))
 
 
 class ECFRFetcher(StatuteFetcher):

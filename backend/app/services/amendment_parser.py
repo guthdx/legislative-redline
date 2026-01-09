@@ -122,6 +122,54 @@ class AmendmentParser:
             r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+and\s+inserting\s+in\s+place\s+thereof\s+' + QUOTE_PATTERN,
             re.IGNORECASE | re.DOTALL
         ),
+        # "by striking 'X' and all that follows through the period at the end and inserting 'Y'"
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+and\s+all\s+that\s+follows\s+through\s+the\s+period\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
+            re.IGNORECASE | re.DOTALL
+        ),
+        # "by striking paragraph (X) and inserting the following:"
+        re.compile(
+            r'(?:by\s+)?striking\s+paragraph\s*\((\d+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?(.+?)(?=\n\n|\Z|"\.\s*$)',
+            re.IGNORECASE | re.DOTALL
+        ),
+    ]
+
+    # Strike through end patterns (special case - strikes from marker through end of provision)
+    STRIKE_THROUGH_END_PATTERNS = [
+        # "by striking 'X' and all that follows through the period at the end and inserting 'Y'"
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+and\s+all\s+that\s+follows\s+through\s+(?:the\s+)?(?:period|semicolon)\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
+            re.IGNORECASE | re.DOTALL
+        ),
+        # "by striking 'X' and all that follows through the period at the end" (no insert)
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+and\s+all\s+that\s+follows\s+through\s+(?:the\s+)?(?:period|semicolon)\s+at\s+the\s+end(?!\s+and\s+insert)',
+            re.IGNORECASE | re.DOTALL
+        ),
+    ]
+
+    # Strike entire subparagraph/paragraph patterns
+    STRIKE_SUBPARAGRAPH_PATTERNS = [
+        # "by striking subparagraphs (B) and (C)"
+        re.compile(
+            r'(?:by\s+)?striking\s+subparagraphs?\s*\(([A-Z])\)\s+and\s+\(([A-Z])\)',
+            re.IGNORECASE
+        ),
+        # "by striking subparagraph (X)"
+        re.compile(
+            r'(?:by\s+)?striking\s+subparagraph\s*\(([A-Z])\)(?!\s+and\s+insert)',
+            re.IGNORECASE
+        ),
+        # "by striking paragraph (X)"
+        re.compile(
+            r'(?:by\s+)?striking\s+paragraph\s*\((\d+)\)(?!\s+and\s+insert)',
+            re.IGNORECASE
+        ),
+        # "by striking subsection (x)"
+        re.compile(
+            r'(?:by\s+)?striking\s+subsection\s*\(([a-z])\)',
+            re.IGNORECASE
+        ),
     ]
 
     # Insert After patterns
@@ -188,7 +236,7 @@ class AmendmentParser:
     STRIKE_PATTERNS = [
         # "by striking 'X'"
         re.compile(
-            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'(?!\s+and\s+insert)',
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'(?!\s+and\s+insert)(?!\s+each\s+place)',
             re.IGNORECASE
         ),
         # "by deleting 'X'"
@@ -204,6 +252,20 @@ class AmendmentParser:
         # "by striking 'X' at the end" - strikes specific text at end of provision
         re.compile(
             r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+at\s+the\s+end(?!\s+and)',
+            re.IGNORECASE
+        ),
+    ]
+
+    # Strike "each place it appears" patterns (global replacement)
+    STRIKE_EACH_PLACE_PATTERNS = [
+        # "by striking 'X' each place it appears"
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+each\s+place\s+(?:it|the\s+term)\s+appears',
+            re.IGNORECASE
+        ),
+        # "by striking 'X' each place it appears and inserting 'Y'"
+        re.compile(
+            r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+each\s+place\s+(?:it|the\s+term)\s+appears\s+and\s+inserting\s+' + QUOTE_PATTERN,
             re.IGNORECASE
         ),
     ]
@@ -229,9 +291,14 @@ class AmendmentParser:
             r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)[,\s]+(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+at\s+the\s+end',
             re.IGNORECASE
         ),
-        # "on subparagraph (E)(ii), by striking the period at the end and inserting '; or'"
+        # "on subparagraph (E)(ii), by striking the period at the end and inserting '; or'" (quoted insert)
         re.compile(
             r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)(?:\s*\(([ivxlcdm0-9]+)\))?[,\s]+(?:by\s+)?striking\s+(?:the\s+)?(\w+)\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
+            re.IGNORECASE
+        ),
+        # "on subparagraph (A), by striking the semicolon at the end and inserting a period" (unquoted insert)
+        re.compile(
+            r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)(?:\s*\(([ivxlcdm0-9]+)\))?[,\s]+(?:by\s+)?striking\s+(?:the\s+)?(\w+)\s+at\s+the\s+end\s+and\s+inserting\s+(?:a\s+)?(\w+)',
             re.IGNORECASE
         ),
         # "by striking subparagraph (E) and inserting the following:"
@@ -349,6 +416,8 @@ class AmendmentParser:
         # Try each pattern type
         amendments.extend(self._parse_strike_insert(text))
         amendments.extend(self._parse_strike_end_insert(text))
+        amendments.extend(self._parse_strike_through_end(text))
+        amendments.extend(self._parse_strike_subparagraphs(text))
         amendments.extend(self._parse_subparagraph_amendments(text))
         amendments.extend(self._parse_insert_after(text))
         amendments.extend(self._parse_insert_before(text))
@@ -356,6 +425,7 @@ class AmendmentParser:
         amendments.extend(self._parse_add_at_end(text))
         amendments.extend(self._parse_add_at_beginning(text))
         amendments.extend(self._parse_strike_only(text))
+        amendments.extend(self._parse_strike_each_place(text))
         amendments.extend(self._parse_redesignate(text))
 
         # Deduplicate amendments (some may be captured by multiple patterns)
@@ -531,28 +601,46 @@ class AmendmentParser:
         for pattern in self.SUBPARAGRAPH_PATTERNS:
             for match in pattern.finditer(text):
                 groups = match.groups()
+                raw_instr = match.group(0).lower()
                 if len(groups) >= 2:
                     subpara = groups[0]
                     if len(groups) == 2:
-                        # Simple subparagraph strike
-                        amendments.append(ParsedAmendment(
-                            amendment_type=AmendmentType.STRIKE,
-                            text_to_strike=groups[1],
-                            target_section=f"subparagraph ({subpara})",
-                            raw_instruction=match.group(0),
-                            confidence=0.9
-                        ))
+                        # Check if this is strike-and-insert or just strike
+                        if 'and inserting' in raw_instr:
+                            # Strike whole subparagraph and insert replacement
+                            # Clean up the insert text - remove leading/trailing quotes
+                            insert_text = groups[1].strip().strip('"\'""''')
+                            amendments.append(ParsedAmendment(
+                                amendment_type=AmendmentType.STRIKE_INSERT,
+                                text_to_strike=f"subparagraph ({subpara})",
+                                text_to_insert=insert_text,
+                                target_section=f"subparagraph ({subpara})",
+                                raw_instruction=match.group(0),
+                                confidence=0.9
+                            ))
+                        else:
+                            # Simple subparagraph strike (at end)
+                            amendments.append(ParsedAmendment(
+                                amendment_type=AmendmentType.STRIKE,
+                                text_to_strike=groups[1],
+                                target_section=f"subparagraph ({subpara})",
+                                raw_instruction=match.group(0),
+                                confidence=0.9
+                            ))
                     elif len(groups) >= 4:
                         # Strike word and insert
                         clause = groups[1] if groups[1] else ""
                         word_to_strike = groups[2]
-                        text_to_insert = groups[3]
-                        strike_text = {"period": ".", "comma": ",", "semicolon": ";"}.get(word_to_strike.lower(), word_to_strike)
+                        word_to_insert = groups[3]
+                        # Map common word names to actual characters
+                        word_map = {"period": ".", "comma": ",", "semicolon": ";", "colon": ":"}
+                        strike_text = word_map.get(word_to_strike.lower(), word_to_strike)
+                        insert_text = word_map.get(word_to_insert.lower(), word_to_insert)
                         target = f"subparagraph ({subpara})" + (f"({clause})" if clause else "")
                         amendments.append(ParsedAmendment(
                             amendment_type=AmendmentType.STRIKE_INSERT,
                             text_to_strike=strike_text,
-                            text_to_insert=text_to_insert.strip(),
+                            text_to_insert=insert_text.strip(),
                             target_section=target,
                             raw_instruction=match.group(0),
                             confidence=0.9
@@ -639,6 +727,87 @@ class AmendmentParser:
                 ))
         return amendments
 
+    def _parse_strike_each_place(self, text: str) -> List[ParsedAmendment]:
+        """Parse 'strike X each place it appears' amendments (global replacement)."""
+        amendments = []
+        for pattern in self.STRIKE_EACH_PLACE_PATTERNS:
+            for match in pattern.finditer(text):
+                groups = match.groups()
+                if len(groups) == 2:
+                    # Strike and replace each place
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE_INSERT,
+                        text_to_strike=groups[0].strip() + " [each place it appears]",
+                        text_to_insert=groups[1].strip(),
+                        raw_instruction=match.group(0),
+                        confidence=0.9
+                    ))
+                elif len(groups) == 1:
+                    # Strike only each place
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE,
+                        text_to_strike=groups[0].strip() + " [each place it appears]",
+                        raw_instruction=match.group(0),
+                        confidence=0.9
+                    ))
+        return amendments
+
+    def _parse_strike_through_end(self, text: str) -> List[ParsedAmendment]:
+        """Parse 'strike X and all that follows through the period at the end' amendments."""
+        amendments = []
+        for pattern in self.STRIKE_THROUGH_END_PATTERNS:
+            for match in pattern.finditer(text):
+                groups = match.groups()
+                if len(groups) == 2:
+                    # Has both strike marker and insert text
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE_INSERT,
+                        text_to_strike=groups[0].strip() + " [and all that follows through end]",
+                        text_to_insert=groups[1].strip(),
+                        raw_instruction=match.group(0),
+                        confidence=0.85
+                    ))
+                elif len(groups) == 1:
+                    # Strike only, no insert
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE,
+                        text_to_strike=groups[0].strip() + " [and all that follows through end]",
+                        raw_instruction=match.group(0),
+                        confidence=0.85
+                    ))
+        return amendments
+
+    def _parse_strike_subparagraphs(self, text: str) -> List[ParsedAmendment]:
+        """Parse amendments that strike entire subparagraphs, paragraphs, or subsections."""
+        amendments = []
+        for pattern in self.STRIKE_SUBPARAGRAPH_PATTERNS:
+            for match in pattern.finditer(text):
+                groups = match.groups()
+                if len(groups) == 2:
+                    # Striking multiple: "subparagraphs (B) and (C)"
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE,
+                        text_to_strike=f"subparagraphs ({groups[0]}) and ({groups[1]})",
+                        raw_instruction=match.group(0),
+                        confidence=0.9
+                    ))
+                elif len(groups) == 1:
+                    # Determine what type we're striking based on the raw match
+                    raw = match.group(0).lower()
+                    if 'subsection' in raw:
+                        target = f"subsection ({groups[0]})"
+                    elif 'paragraph' in raw and 'sub' not in raw:
+                        target = f"paragraph ({groups[0]})"
+                    else:
+                        target = f"subparagraph ({groups[0]})"
+                    amendments.append(ParsedAmendment(
+                        amendment_type=AmendmentType.STRIKE,
+                        text_to_strike=target,
+                        raw_instruction=match.group(0),
+                        confidence=0.9
+                    ))
+        return amendments
+
     def _parse_redesignate(self, text: str) -> List[ParsedAmendment]:
         """Parse redesignation amendments."""
         amendments = []
@@ -695,10 +864,25 @@ class AmendmentApplier:
     """
     Applies parsed amendments to original statute text.
 
+    Enhanced to handle:
+    - Structural references (subparagraph (A), paragraph (1), subsection (a))
+    - "All that follows through the period at the end" patterns
+    - "Each place it appears" global replacements
+
     Usage:
         applier = AmendmentApplier()
         amended_text = applier.apply(original_text, parsed_amendment)
     """
+
+    # Patterns to find structural elements in statute text
+    # Subsection pattern: (a), (b), etc. at start of line or after newline
+    SUBSECTION_PATTERN = re.compile(r'\n?\s*\(([a-z])\)\s+', re.IGNORECASE)
+    # Paragraph pattern: (1), (2), etc.
+    PARAGRAPH_PATTERN = re.compile(r'\n?\s*\((\d+)\)\s+')
+    # Subparagraph pattern: (A), (B), etc.
+    SUBPARAGRAPH_PATTERN = re.compile(r'\n?\s*\(([A-Z])\)\s+')
+    # Clause pattern: (i), (ii), (iii), etc.
+    CLAUSE_PATTERN = re.compile(r'\n?\s*\(([ivxlcdm]+)\)\s+', re.IGNORECASE)
 
     def apply(self, original_text: str, amendment: ParsedAmendment) -> Tuple[str, bool]:
         """
@@ -739,14 +923,163 @@ class AmendmentApplier:
 
     def _apply_strike_insert(self, text: str, amendment: ParsedAmendment) -> Tuple[str, bool]:
         """Replace struck text with inserted text."""
-        if amendment.text_to_strike in text:
-            return text.replace(amendment.text_to_strike, amendment.text_to_insert, 1), True
+        strike_text = amendment.text_to_strike
+        insert_text = amendment.text_to_insert
+
+        # Check for special markers
+        is_all_that_follows = "[and all that follows through end]" in strike_text
+        is_each_place = "[each place it appears]" in strike_text
+        is_structural = strike_text.startswith(("subparagraph (", "paragraph (", "subsection ("))
+
+        # Handle "each place it appears" - global replacement
+        if is_each_place:
+            actual_text = strike_text.replace(" [each place it appears]", "")
+            if actual_text in text:
+                return text.replace(actual_text, insert_text), True
+            pattern = re.compile(re.escape(actual_text), re.IGNORECASE)
+            if pattern.search(text):
+                return pattern.sub(insert_text, text), True
+            logger.warning(f"Could not find text to strike: '{actual_text[:50]}...'")
+            return text, False
+
+        # Handle "and all that follows through the period at the end"
+        if is_all_that_follows:
+            actual_text = strike_text.replace(" [and all that follows through end]", "")
+            return self._apply_strike_through_end(text, actual_text, insert_text)
+
+        # Handle structural references (subparagraph (E), etc.)
+        if is_structural:
+            return self._apply_structural_strike_insert(text, strike_text, insert_text)
+
+        # Standard text replacement
+        if strike_text in text:
+            return text.replace(strike_text, insert_text, 1), True
+
         # Try case-insensitive match
-        pattern = re.compile(re.escape(amendment.text_to_strike), re.IGNORECASE)
+        pattern = re.compile(re.escape(strike_text), re.IGNORECASE)
         if pattern.search(text):
-            return pattern.sub(amendment.text_to_insert, text, count=1), True
-        logger.warning(f"Could not find text to strike: '{amendment.text_to_strike[:50]}...'")
+            return pattern.sub(insert_text, text, count=1), True
+
+        logger.warning(f"Could not find text to strike: '{strike_text[:50]}...'")
         return text, False
+
+    def _apply_strike_through_end(self, text: str, marker_text: str, insert_text: str) -> Tuple[str, bool]:
+        """
+        Handle "strike X and all that follows through the period at the end".
+
+        Finds the marker text and deletes from there to the next period (end of provision).
+        """
+        # Find the marker text
+        marker_pos = text.find(marker_text)
+        if marker_pos == -1:
+            # Try case-insensitive
+            text_lower = text.lower()
+            marker_lower = marker_text.lower()
+            marker_pos = text_lower.find(marker_lower)
+
+        if marker_pos == -1:
+            logger.warning(f"Could not find marker text: '{marker_text[:50]}...'")
+            return text, False
+
+        # Find the end - look for period followed by newline or end of text
+        # Also look for the typical end of a statutory provision
+        end_patterns = [
+            r'\.\s*\n',           # Period followed by newline
+            r'\.\s*$',            # Period at end of text
+            r'\.\s*\([a-z]\)',    # Period followed by next subsection
+            r'\.\s*\(\d+\)',      # Period followed by next paragraph
+        ]
+
+        remaining_text = text[marker_pos:]
+        end_pos = None
+
+        for pattern in end_patterns:
+            match = re.search(pattern, remaining_text)
+            if match:
+                # Include the period in what we're striking
+                end_pos = marker_pos + match.start() + 1  # +1 to include the period
+                break
+
+        if end_pos is None:
+            # Fallback: find the last period in the text
+            last_period = text.rfind('.')
+            if last_period > marker_pos:
+                end_pos = last_period + 1
+            else:
+                logger.warning("Could not find end of provision")
+                return text, False
+
+        # Construct the amended text
+        before_marker = text[:marker_pos]
+        after_end = text[end_pos:]
+
+        # Clean up: ensure proper spacing
+        amended = before_marker.rstrip() + " " + insert_text + after_end.lstrip()
+        return amended, True
+
+    def _apply_structural_strike_insert(self, text: str, structural_ref: str, insert_text: str) -> Tuple[str, bool]:
+        """
+        Handle striking a structural element (subparagraph, paragraph, subsection).
+
+        Finds the content of the referenced element and replaces it.
+        """
+        # Parse the structural reference
+        struct_match = re.match(r'(subparagraph|paragraph|subsection)\s*\(([A-Za-z0-9]+)\)', structural_ref, re.IGNORECASE)
+        if not struct_match:
+            logger.warning(f"Could not parse structural reference: {structural_ref}")
+            return text, False
+
+        struct_type = struct_match.group(1).lower()
+        struct_id = struct_match.group(2)
+
+        # Find the element in the text
+        element_content = self._find_structural_element(text, struct_type, struct_id)
+        if element_content is None:
+            logger.warning(f"Could not find {structural_ref} in text")
+            return text, False
+
+        start_pos, end_pos, content = element_content
+
+        # Replace the content
+        before = text[:start_pos]
+        after = text[end_pos:]
+
+        # Format the insert text with proper structure
+        formatted_insert = f"({struct_id}) {insert_text}"
+        if struct_type == "subparagraph":
+            formatted_insert = f"({struct_id}) {insert_text}"
+
+        amended = before + formatted_insert + after
+        return amended, True
+
+    def _find_structural_element(self, text: str, struct_type: str, struct_id: str) -> Optional[Tuple[int, int, str]]:
+        """
+        Find a structural element in the text.
+
+        Returns: (start_position, end_position, content) or None if not found
+        """
+        # Build pattern based on structure type
+        if struct_type == "subsection":
+            pattern = re.compile(rf'\(({struct_id})\)\s+(.+?)(?=\n\s*\([a-z]\)|\Z)', re.IGNORECASE | re.DOTALL)
+        elif struct_type == "paragraph":
+            pattern = re.compile(rf'\(({struct_id})\)\s+(.+?)(?=\n\s*\(\d+\)|\n\s*\([a-z]\)|\Z)', re.DOTALL)
+        elif struct_type == "subparagraph":
+            pattern = re.compile(rf'\(({struct_id})\)\s+(.+?)(?=\n\s*\([A-Z]\)|\n\s*\(\d+\)|\n\s*\([a-z]\)|\Z)', re.DOTALL)
+        else:
+            return None
+
+        match = pattern.search(text)
+        if match:
+            return (match.start(), match.end(), match.group(2).strip())
+
+        # Fallback: try simpler patterns for formatted statute text
+        # Look for patterns like "(E) text..." on a line
+        simple_pattern = re.compile(rf'\(({struct_id})\)\s*([^\n]+)', re.IGNORECASE)
+        match = simple_pattern.search(text)
+        if match:
+            return (match.start(), match.end(), match.group(2).strip())
+
+        return None
 
     def _apply_insert_after(self, text: str, amendment: ParsedAmendment) -> Tuple[str, bool]:
         """Insert text after the position marker."""
@@ -798,10 +1131,75 @@ class AmendmentApplier:
 
     def _apply_strike(self, text: str, amendment: ParsedAmendment) -> Tuple[str, bool]:
         """Remove struck text."""
-        if amendment.text_to_strike in text:
-            return text.replace(amendment.text_to_strike, "", 1), True
-        pattern = re.compile(re.escape(amendment.text_to_strike), re.IGNORECASE)
+        strike_text = amendment.text_to_strike
+
+        # Check for special markers
+        is_each_place = "[each place it appears]" in strike_text
+        is_structural = strike_text.startswith(("subparagraph", "paragraph", "subsection"))
+
+        # Handle "each place it appears" - global removal
+        if is_each_place:
+            actual_text = strike_text.replace(" [each place it appears]", "")
+            if actual_text in text:
+                return text.replace(actual_text, ""), True
+            pattern = re.compile(re.escape(actual_text), re.IGNORECASE)
+            if pattern.search(text):
+                return pattern.sub("", text), True
+            logger.warning(f"Could not find text to strike: '{actual_text[:50]}...'")
+            return text, False
+
+        # Handle structural references (strike subparagraph (E), etc.)
+        if is_structural:
+            return self._apply_structural_strike(text, strike_text)
+
+        # Standard text removal
+        if strike_text in text:
+            return text.replace(strike_text, "", 1), True
+        pattern = re.compile(re.escape(strike_text), re.IGNORECASE)
         if pattern.search(text):
             return pattern.sub("", text, count=1), True
-        logger.warning(f"Could not find text to strike: '{amendment.text_to_strike[:50]}...'")
+        logger.warning(f"Could not find text to strike: '{strike_text[:50]}...'")
+        return text, False
+
+    def _apply_structural_strike(self, text: str, structural_ref: str) -> Tuple[str, bool]:
+        """
+        Handle striking a structural element entirely.
+
+        For "by striking subparagraphs (B) and (C)" - removes both elements.
+        """
+        # Check for multiple elements: "subparagraphs (B) and (C)"
+        multi_match = re.match(r'subparagraphs?\s*\(([A-Z])\)\s+and\s+\(([A-Z])\)', structural_ref, re.IGNORECASE)
+        if multi_match:
+            # Strike multiple subparagraphs
+            id1, id2 = multi_match.group(1), multi_match.group(2)
+            result_text = text
+            success = False
+
+            for struct_id in [id1, id2]:
+                element = self._find_structural_element(result_text, "subparagraph", struct_id)
+                if element:
+                    start, end, _ = element
+                    result_text = result_text[:start] + result_text[end:]
+                    success = True
+
+            if success:
+                return result_text, True
+            logger.warning(f"Could not find subparagraphs ({id1}) and ({id2})")
+            return text, False
+
+        # Single structural element
+        struct_match = re.match(r'(subparagraph|paragraph|subsection)\s*\(([A-Za-z0-9]+)\)', structural_ref, re.IGNORECASE)
+        if struct_match:
+            struct_type = struct_match.group(1).lower()
+            struct_id = struct_match.group(2)
+
+            element = self._find_structural_element(text, struct_type, struct_id)
+            if element:
+                start, end, _ = element
+                return text[:start] + text[end:], True
+
+            logger.warning(f"Could not find {structural_ref}")
+            return text, False
+
+        logger.warning(f"Could not parse structural reference: {structural_ref}")
         return text, False

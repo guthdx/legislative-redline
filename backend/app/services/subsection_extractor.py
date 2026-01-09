@@ -245,21 +245,31 @@ class SubsectionExtractor:
         Level 1: a, b, c (lowercase letters)
         Level 2: 1, 2, 3 (numbers)
         Level 3: A, B, C (uppercase letters)
-        Level 4: i, ii, iii (lowercase roman numerals)
-        Level 5: I, II, III (uppercase roman numerals)
+        Level 4: i, ii, iii (lowercase roman numerals - must be multi-char or specific)
+        Level 5: I, II, III (uppercase roman numerals - must be multi-char or specific)
+
+        Note: Single letters like 'c', 'i', 'v' are treated as level 1/3 (subsections),
+        not roman numerals. Roman numerals are typically multi-character (ii, iii, iv, etc.)
+        or at most single 'i' in certain contexts.
         """
         if component.isdigit():
             return 2
         elif component.islower():
-            # Check if it's a roman numeral
-            if re.match(r'^[ivxlcdm]+$', component):
-                return 4
+            # Single lowercase letters are always subsections (level 1)
+            # Multi-character sequences that look like roman numerals are level 4
+            if len(component) == 1:
+                return 1  # Single letter = subsection
+            elif re.match(r'^[ivxlcdm]+$', component):
+                return 4  # Multi-char roman numeral
             else:
                 return 1
         elif component.isupper():
-            # Check if it's a roman numeral
-            if re.match(r'^[IVXLCDM]+$', component):
-                return 5
+            # Single uppercase letters are always subparagraphs (level 3)
+            # Multi-character sequences that look like roman numerals are level 5
+            if len(component) == 1:
+                return 3  # Single letter = subparagraph
+            elif re.match(r'^[IVXLCDM]+$', component):
+                return 5  # Multi-char roman numeral
             else:
                 return 3
         return 1
