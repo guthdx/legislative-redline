@@ -91,6 +91,38 @@ class AmendmentParser:
             print(f"Insert: {amendment.text_to_insert}")
     """
 
+    # Quote normalization mappings (smart quotes -> straight quotes)
+    QUOTE_NORMALIZATION = {
+        '\u201c': '"',  # Left double quotation mark
+        '\u201d': '"',  # Right double quotation mark
+        '\u2018': "'",  # Left single quotation mark
+        '\u2019': "'",  # Right single quotation mark
+        '\u201a': "'",  # Single low-9 quotation mark
+        '\u201b': "'",  # Single high-reversed-9 quotation mark
+        '\u201e': '"',  # Double low-9 quotation mark
+        '\u201f': '"',  # Double high-reversed-9 quotation mark
+        '\u2032': "'",  # Prime
+        '\u2033': '"',  # Double prime
+    }
+
+    @staticmethod
+    def normalize_quotes(text: str) -> str:
+        """
+        Normalize smart quotes and other quote variants to standard ASCII quotes.
+
+        This ensures consistent pattern matching regardless of the source document's
+        quote style (Word, Google Docs, PDF, etc.).
+
+        Args:
+            text: The text to normalize
+
+        Returns:
+            Text with all quote variants converted to straight quotes
+        """
+        for smart_quote, straight_quote in AmendmentParser.QUOTE_NORMALIZATION.items():
+            text = text.replace(smart_quote, straight_quote)
+        return text
+
     # Patterns for different amendment types
     # Using non-greedy matching and flexible quote handling
 
@@ -338,6 +370,8 @@ class AmendmentParser:
         re.compile(r'are\s+amended', re.IGNORECASE),
         re.compile(r'is\s+hereby\s+amended', re.IGNORECASE),
         re.compile(r'shall\s+be\s+amended', re.IGNORECASE),
+        re.compile(r'is\s+further\s+amended', re.IGNORECASE),  # Phase 1: further amended
+        re.compile(r'are\s+further\s+amended', re.IGNORECASE),  # Phase 1: further amended (plural)
         re.compile(r'by\s+striking', re.IGNORECASE),
         re.compile(r'by\s+inserting', re.IGNORECASE),
         re.compile(r'by\s+adding', re.IGNORECASE),
@@ -345,8 +379,9 @@ class AmendmentParser:
     ]
 
     # Pattern to detect numbered amendment lists: (1) by..., (2) by...
+    # Handles both "is amended—" and "is further amended—"
     NUMBERED_AMENDMENT_PATTERN = re.compile(
-        r'is\s+amended[—\-:\s]+(?:\n\s*)?(\(\d+\)[^(]+(?:\(\d+\)[^(]+)*)',
+        r'is\s+(?:further\s+)?amended[—\-:\s]+(?:\n\s*)?(\(\d+\)[^(]+(?:\(\d+\)[^(]+)*)',
         re.IGNORECASE | re.DOTALL
     )
 
@@ -400,6 +435,10 @@ class AmendmentParser:
                 success=False,
                 error_message="No text provided"
             )
+
+        # Phase 1: Normalize quotes before processing
+        # This ensures consistent pattern matching regardless of source document
+        text = self.normalize_quotes(text)
 
         # Check if this is just a definitional reference
         if self.is_definitional_reference(text) and not self.is_amendment_context(text):
