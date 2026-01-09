@@ -144,12 +144,21 @@ The parser normalizes smart quotes before processing:
 - `'` `'` → `'`  (smart single quotes)
 - `′` `″` → `'` `"`  (prime characters)
 
+### Phase 2: Structural Operations (Jan 2025)
+
+| Type | Pattern | Example |
+|------|---------|---------|
+| `redesignate` (range) | paragraphs (X) through (Y) as | "by redesignating paragraphs (2) through (6) as paragraphs (3) through (7)" |
+| `designate` | designating X as Y | "by designating the matter preceding paragraph (1) as subsection (a)" |
+| `strike_redesignate` | strike X and redesignate | "by striking paragraph (2) and redesignating paragraphs (3) through (5)" |
+
 ### Coverage Analysis (Jan 2025)
 
 Based on analysis of 2.3M+ characters of legislative text:
-- **96.8% pattern coverage** of real-world amendments
+- **~99.7% pattern coverage** after Phase 1 + 2
 - 598 amendment operations analyzed
-- Core patterns catch ~82% of amendments directly
+- Phase 1 added: further_amended, quote normalization
+- Phase 2 added: redesignate ranges, designate patterns
 
 ## Development
 

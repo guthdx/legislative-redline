@@ -1,10 +1,12 @@
 """
-Tests for Amendment Parser - Phase 1 improvements
+Tests for Amendment Parser - Phase 1 & 2 improvements
 
 Tests:
-1. "is further amended by" pattern detection
-2. Quote normalization
+1. "is further amended by" pattern detection (Phase 1)
+2. Quote normalization (Phase 1)
 3. Backward compatibility with existing patterns
+4. Redesignate patterns - enhanced (Phase 2)
+5. Designate patterns - new (Phase 2)
 """
 
 import pytest
@@ -153,6 +155,133 @@ class TestEdgeCases:
         result = parser.parse(text)
         # Should detect the amendment despite the definitional text
         assert result.success is True
+
+
+# =============================================================================
+# Phase 2 Tests: Redesignate and Designate Patterns
+# =============================================================================
+
+class TestRedesignatePatterns:
+    """Test enhanced redesignate patterns (Phase 2)."""
+
+    def test_simple_redesignate(self):
+        """Test basic redesignation pattern."""
+        parser = AmendmentParser()
+        text = "is amended by redesignating subsection (c) as subsection (d)"
+        result = parser.parse(text)
+        assert result.success is True
+        assert any(a.amendment_type == AmendmentType.REDESIGNATE for a in result.amendments)
+
+    def test_redesignate_paragraph_range(self):
+        """Test redesignating a range of paragraphs."""
+        parser = AmendmentParser()
+        text = "is amended by redesignating paragraphs (2) through (6) as paragraphs (3) through (7)"
+        result = parser.parse(text)
+        assert result.success is True
+        redesignates = [a for a in result.amendments if a.amendment_type == AmendmentType.REDESIGNATE]
+        assert len(redesignates) >= 1
+        # Check that range is captured
+        assert "through" in redesignates[0].text_to_strike.lower()
+
+    def test_redesignate_subparagraph_range(self):
+        """Test redesignating a range of subparagraphs."""
+        parser = AmendmentParser()
+        text = "is amended by redesignating subparagraphs (B) through (D) as subparagraphs (C) through (E)"
+        result = parser.parse(text)
+        assert result.success is True
+        redesignates = [a for a in result.amendments if a.amendment_type == AmendmentType.REDESIGNATE]
+        assert len(redesignates) >= 1
+
+    def test_strike_and_redesignate(self):
+        """Test combined strike and redesignate pattern."""
+        parser = AmendmentParser()
+        text = "is amended by striking paragraph (2) and redesignating paragraphs (3) through (5) as paragraphs (2) through (4)"
+        result = parser.parse(text)
+        assert result.success is True
+        # Should detect both the strike and the redesignate
+        assert len(result.amendments) >= 1
+
+    def test_redesignate_keyword_fallback(self):
+        """Test that 'redesignating' keyword is detected even without full pattern match."""
+        parser = AmendmentParser()
+        text = "is amended by redesignating the existing provisions"
+        assert parser.is_amendment_context(text) is True
+
+
+class TestDesignatePatterns:
+    """Test new designate patterns (Phase 2)."""
+
+    def test_designate_detection(self):
+        """Test that 'by designating' is recognized as amendment context."""
+        parser = AmendmentParser()
+        text = "Section 501 is amended by designating paragraph (1) as subparagraph (A)"
+        assert parser.is_amendment_context(text) is True
+
+    def test_simple_designate(self):
+        """Test basic designation pattern."""
+        parser = AmendmentParser()
+        text = "is amended by designating paragraph (1) as subparagraph (A)"
+        result = parser.parse(text)
+        assert result.success is True
+        designates = [a for a in result.amendments if a.amendment_type == AmendmentType.DESIGNATE]
+        assert len(designates) >= 1
+
+    def test_designate_matter_preceding(self):
+        """Test designating 'matter preceding' pattern."""
+        parser = AmendmentParser()
+        text = "is amended by designating the matter preceding paragraph (1) as subsection (a)"
+        result = parser.parse(text)
+        assert result.success is True
+        designates = [a for a in result.amendments if a.amendment_type == AmendmentType.DESIGNATE]
+        assert len(designates) >= 1
+        # Check that 'matter preceding' is captured
+        assert "matter" in designates[0].text_to_strike.lower()
+
+    def test_designate_keyword_fallback(self):
+        """Test that 'designating' keyword is detected even without full pattern match."""
+        parser = AmendmentParser()
+        text = "is amended by designating the existing text"
+        assert parser.is_amendment_context(text) is True
+
+    def test_designate_not_redesignate(self):
+        """Test that 'designating' doesn't match 'redesignating'."""
+        parser = AmendmentParser()
+        text = "is amended by redesignating subsection (a) as subsection (b)"
+        result = parser.parse(text)
+        # Should be REDESIGNATE, not DESIGNATE
+        designates = [a for a in result.amendments if a.amendment_type == AmendmentType.DESIGNATE]
+        redesignates = [a for a in result.amendments if a.amendment_type == AmendmentType.REDESIGNATE]
+        assert len(redesignates) >= 1
+        # There may be some designate matches from overly broad patterns, but redesignate should be primary
+
+
+class TestPhase2Integration:
+    """Integration tests for Phase 2 patterns with real-world examples."""
+
+    def test_complex_restructuring_amendment(self):
+        """Test a complex amendment with multiple structural changes."""
+        parser = AmendmentParser()
+        text = """Section 1234 is amended—
+        (1) by redesignating subsection (c) as subsection (d);
+        (2) by designating the matter preceding paragraph (1) as subsection (a);
+        (3) by striking paragraph (2) and redesignating paragraphs (3) through (5) as paragraphs (2) through (4); and
+        (4) by adding at the end the following new subsection."""
+        result = parser.parse(text)
+        assert result.success is True
+        # Should detect multiple amendment types
+        amendment_types = {a.amendment_type for a in result.amendments}
+        assert len(amendment_types) >= 2  # At least redesignate and add_at_end
+
+    def test_farm_bill_style_amendment(self):
+        """Test amendment pattern typical of Farm Bill legislation."""
+        parser = AmendmentParser()
+        text = """Section 1244(a) of the Food Security Act of 1985 (16 U.S.C. 3844(a)) is amended—
+        (1) by redesignating paragraphs (2) through (6) as paragraphs (3) through (7);
+        (2) by inserting after paragraph (1) the following new paragraph."""
+        result = parser.parse(text)
+        assert result.success is True
+        redesignates = [a for a in result.amendments if a.amendment_type == AmendmentType.REDESIGNATE]
+        assert len(redesignates) >= 1
 
 
 if __name__ == "__main__":

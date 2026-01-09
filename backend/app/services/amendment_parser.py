@@ -34,7 +34,8 @@ class AmendmentType(str, Enum):
     ADD_AT_END = "add_at_end"
     ADD_AT_BEGINNING = "add_at_beginning"
     STRIKE = "strike"
-    REDESIGNATE = "redesignate"
+    REDESIGNATE = "redesignate"  # Renumbering/reordering existing elements
+    DESIGNATE = "designate"  # Phase 2: Initial designation of elements
     UNKNOWN = "unknown"
 
 
@@ -66,6 +67,12 @@ class ParsedAmendment:
             return bool(self.text_to_insert)
         elif self.amendment_type == AmendmentType.STRIKE:
             return bool(self.text_to_strike)
+        elif self.amendment_type == AmendmentType.REDESIGNATE:
+            # Redesignate needs: what to rename (text_to_strike) and new name (text_to_insert)
+            return bool(self.text_to_strike and self.text_to_insert)
+        elif self.amendment_type == AmendmentType.DESIGNATE:
+            # Designate needs: what to designate (text_to_strike) and designation (text_to_insert)
+            return bool(self.text_to_strike and self.text_to_insert)
         return False
 
 
@@ -340,11 +347,45 @@ class AmendmentParser:
         ),
     ]
 
-    # Redesignate patterns
+    # Redesignate patterns - Phase 2: Enhanced for ranges and combined operations
     REDESIGNATE_PATTERNS = [
-        # "by redesignating subsection (a) as subsection (b)"
+        # "by redesignating subsection (a) as subsection (b)" - single element
         re.compile(
             r'(?:by\s+)?redesignating\s+(\w+\s*\([^)]+\))\s+as\s+(\w+\s*\([^)]+\))',
+            re.IGNORECASE
+        ),
+        # "by redesignating paragraphs (2) through (6) as paragraphs (3) through (7)" - range
+        re.compile(
+            r'(?:by\s+)?redesignating\s+(\w+s?\s*\(\d+\)\s+through\s+\(\d+\))\s+as\s+(\w+s?\s*\(\d+\)\s+through\s+\(\d+\))',
+            re.IGNORECASE
+        ),
+        # "by redesignating subparagraphs (B) through (D) as subparagraphs (C) through (E)" - letter range
+        re.compile(
+            r'(?:by\s+)?redesignating\s+(\w+s?\s*\([A-Z]\)\s+through\s+\([A-Z]\))\s+as\s+(\w+s?\s*\([A-Z]\)\s+through\s+\([A-Z]\))',
+            re.IGNORECASE
+        ),
+        # "by redesignating clauses (i) through (iv) as clauses (ii) through (v)" - roman numeral range
+        re.compile(
+            r'(?:by\s+)?redesignating\s+(\w+s?\s*\([ivxlcdm]+\)\s+through\s+\([ivxlcdm]+\))\s+as\s+(\w+s?\s*\([ivxlcdm]+\)\s+through\s+\([ivxlcdm]+\))',
+            re.IGNORECASE
+        ),
+        # "by striking paragraph (2) and redesignating paragraphs (3) through (5) as paragraphs (2) through (4)"
+        re.compile(
+            r'(?:by\s+)?striking\s+\w+\s*\([^)]+\)\s+and\s+redesignating\s+(\w+s?\s*\([^)]+\)\s+through\s+\([^)]+\))\s+as\s+(\w+s?\s*\([^)]+\)\s+through\s+\([^)]+\))',
+            re.IGNORECASE
+        ),
+    ]
+
+    # Designate patterns - Phase 2: Initial designation (not redesignation)
+    DESIGNATE_PATTERNS = [
+        # "by designating the matter preceding paragraph (1) as subsection (a)"
+        re.compile(
+            r'(?:by\s+)?designating\s+(?:the\s+)?(.+?)\s+as\s+(\w+\s*\([^)]+\))',
+            re.IGNORECASE
+        ),
+        # "by designating paragraph (1) as subparagraph (A)"
+        re.compile(
+            r'(?:by\s+)?designating\s+(\w+\s*\([^)]+\))\s+as\s+(\w+\s*\([^)]+\))',
             re.IGNORECASE
         ),
     ]
@@ -376,6 +417,7 @@ class AmendmentParser:
         re.compile(r'by\s+inserting', re.IGNORECASE),
         re.compile(r'by\s+adding', re.IGNORECASE),
         re.compile(r'by\s+redesignating', re.IGNORECASE),
+        re.compile(r'by\s+designating', re.IGNORECASE),  # Phase 2: initial designation
     ]
 
     # Pattern to detect numbered amendment lists: (1) by..., (2) by...
@@ -466,6 +508,7 @@ class AmendmentParser:
         amendments.extend(self._parse_strike_only(text))
         amendments.extend(self._parse_strike_each_place(text))
         amendments.extend(self._parse_redesignate(text))
+        amendments.extend(self._parse_designate(text))  # Phase 2
 
         # Deduplicate amendments (some may be captured by multiple patterns)
         amendments = self._deduplicate_amendments(amendments)
@@ -848,12 +891,36 @@ class AmendmentParser:
         return amendments
 
     def _parse_redesignate(self, text: str) -> List[ParsedAmendment]:
-        """Parse redesignation amendments."""
+        """Parse redesignation amendments (renumbering/reordering existing elements)."""
         amendments = []
         for pattern in self.REDESIGNATE_PATTERNS:
             for match in pattern.finditer(text):
                 amendments.append(ParsedAmendment(
                     amendment_type=AmendmentType.REDESIGNATE,
+                    text_to_strike=match.group(1).strip(),
+                    text_to_insert=match.group(2).strip(),
+                    raw_instruction=match.group(0),
+                    confidence=0.85
+                ))
+        return amendments
+
+    def _parse_designate(self, text: str) -> List[ParsedAmendment]:
+        """
+        Parse designation amendments (initial assignment of structural labels).
+
+        Phase 2: Detects patterns like:
+        - "by designating the matter preceding paragraph (1) as subsection (a)"
+        - "by designating paragraph (1) as subparagraph (A)"
+        """
+        amendments = []
+        for pattern in self.DESIGNATE_PATTERNS:
+            for match in pattern.finditer(text):
+                # Skip if this is actually a redesignation (caught by other patterns)
+                raw = match.group(0).lower()
+                if 'redesignating' in raw:
+                    continue
+                amendments.append(ParsedAmendment(
+                    amendment_type=AmendmentType.DESIGNATE,
                     text_to_strike=match.group(1).strip(),
                     text_to_insert=match.group(2).strip(),
                     raw_instruction=match.group(0),
@@ -892,6 +959,18 @@ class AmendmentParser:
         elif "striking" in text_lower or "deleting" in text_lower:
             return ParsedAmendment(
                 amendment_type=AmendmentType.STRIKE,
+                raw_instruction=text[:200],
+                confidence=0.5
+            )
+        elif "redesignating" in text_lower:
+            return ParsedAmendment(
+                amendment_type=AmendmentType.REDESIGNATE,
+                raw_instruction=text[:200],
+                confidence=0.5
+            )
+        elif "designating" in text_lower:
+            return ParsedAmendment(
+                amendment_type=AmendmentType.DESIGNATE,
                 raw_instruction=text[:200],
                 confidence=0.5
             )
