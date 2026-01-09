@@ -117,13 +117,26 @@ ins.redline-inserted {
    Prose Overrides for Legal Content
    =================================== */
 
-.prose del {
+/* Style all del tags in prose (inline view) */
+.prose del,
+del {
+  background-color: #fee2e2;
   text-decoration: line-through;
   text-decoration-color: #dc2626;
+  color: #991b1b;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 
-.prose ins {
+/* Style all ins tags in prose (inline view) */
+.prose ins,
+ins {
+  background-color: #dcfce7;
   text-decoration: none;
+  color: #166534;
+  font-weight: 600;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 
 /* Remove default prose styling for del/ins */
@@ -132,4 +145,21 @@ ins.redline-inserted {
 .prose ins::before,
 .prose ins::after {
   content: '';
+}
+
+/* Side-by-side view highlighting */
+.side-by-side-original del,
+.side-by-side-original .deleted {
+  background-color: #fee2e2;
+  color: #991b1b;
+  text-decoration: line-through;
+  padding: 0 2px;
+}
+
+.side-by-side-amended ins,
+.side-by-side-amended .inserted {
+  background-color: #dcfce7;
+  color: #166534;
+  font-weight: 600;
+  padding: 0 2px;
 }
