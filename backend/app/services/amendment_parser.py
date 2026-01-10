@@ -166,9 +166,16 @@ class AmendmentParser:
             r'(?:by\s+)?striking\s+' + QUOTE_PATTERN + r'\s+and\s+all\s+that\s+follows\s+through\s+the\s+period\s+at\s+the\s+end\s+and\s+inserting\s+' + QUOTE_PATTERN,
             re.IGNORECASE | re.DOTALL
         ),
-        # "by striking paragraph (X) and inserting the following:"
+        # "by striking paragraph (X) and inserting the following:" with quoted text after newlines
+        # Captures full "paragraph (X)" as group 1, insert text as group 2
         re.compile(
-            r'(?:by\s+)?striking\s+paragraph\s*\((\d+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?(.+?)(?=\n\n|\Z|"\.\s*$)',
+            r'(?:by\s+)?striking\s+(paragraph\s*\(\d+\))\s+and\s+inserting\s+the\s+following:\s*\n+["\u201c](.+?)["\u201d](?=\s*\n|\Z)',
+            re.IGNORECASE | re.DOTALL
+        ),
+        # "by striking paragraph (X) and inserting 'Y'" (inline)
+        # Captures full "paragraph (X)" as group 1, insert text as group 2
+        re.compile(
+            r'(?:by\s+)?striking\s+(paragraph\s*\(\d+\))\s+and\s+inserting\s+' + QUOTE_PATTERN,
             re.IGNORECASE | re.DOTALL
         ),
     ]
@@ -340,9 +347,14 @@ class AmendmentParser:
             r'(?:on|in)\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)(?:\s*\(([ivxlcdm0-9]+)\))?[,\s]+(?:by\s+)?striking\s+(?:the\s+)?(\w+)\s+at\s+the\s+end\s+and\s+inserting\s+(?:a\s+)?(\w+)',
             re.IGNORECASE
         ),
-        # "by striking subparagraph (E) and inserting the following:"
+        # "by striking subparagraph (E) and inserting the following:" - captures structural type
         re.compile(
-            r'(?:by\s+)?striking\s+(?:subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?(.+?)(?=\n\n|\Z|"\.|"\s*$)',
+            r'(?:by\s+)?striking\s+(subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+the\s+following:\s*\n*["\u201c](.+?)["\u201d](?=\s*\n|\Z)',
+            re.IGNORECASE | re.DOTALL
+        ),
+        # "by striking subparagraph (E) and inserting 'X'" (inline) - captures structural type
+        re.compile(
+            r'(?:by\s+)?striking\s+(subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+' + QUOTE_PATTERN,
             re.IGNORECASE | re.DOTALL
         ),
     ]
@@ -640,15 +652,19 @@ class AmendmentParser:
             return amendments
 
         # Pattern: "by striking subparagraph (E) and inserting the following:"
+        # Captures both the structural type (subparagraph/paragraph) and the identifier
         strike_subpara_match = re.search(
-            r'(?:by\s+)?striking\s+(?:subparagraph|paragraph)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?["\']?(.+?)["\']?\s*$',
+            r'(?:by\s+)?striking\s+(subparagraph|paragraph)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+(?:the\s+following[:\s]+)?["\']?(.+?)["\']?\s*$',
             item, re.IGNORECASE | re.DOTALL
         )
         if strike_subpara_match:
+            struct_type = strike_subpara_match.group(1).lower()  # "subparagraph" or "paragraph"
+            struct_id = strike_subpara_match.group(2)
+            insert_text = strike_subpara_match.group(3).strip().strip('"\'')
             amendments.append(ParsedAmendment(
                 amendment_type=AmendmentType.STRIKE_INSERT,
-                text_to_strike=f"subparagraph ({strike_subpara_match.group(1)})",
-                text_to_insert=strike_subpara_match.group(2).strip().strip('"\''),
+                text_to_strike=f"{struct_type} ({struct_id})",
+                text_to_insert=insert_text,
                 raw_instruction=item,
                 confidence=0.85
             ))
@@ -684,7 +700,28 @@ class AmendmentParser:
             for match in pattern.finditer(text):
                 groups = match.groups()
                 raw_instr = match.group(0).lower()
-                if len(groups) >= 2:
+
+                # Check if first group is a structural type (subparagraph/paragraph/clause)
+                # vs an identifier (A, B, 1, 2, etc.)
+                first_group_is_struct_type = groups[0].lower() in ('subparagraph', 'paragraph', 'clause')
+
+                if first_group_is_struct_type and len(groups) >= 3:
+                    # New pattern format: (struct_type, id, insert_text)
+                    struct_type = groups[0].lower()
+                    struct_id = groups[1]
+                    insert_text = groups[2].strip().strip('"\'""''') if groups[2] else ""
+
+                    if insert_text:
+                        amendments.append(ParsedAmendment(
+                            amendment_type=AmendmentType.STRIKE_INSERT,
+                            text_to_strike=f"{struct_type} ({struct_id})",
+                            text_to_insert=insert_text,
+                            target_section=f"{struct_type} ({struct_id})",
+                            raw_instruction=match.group(0),
+                            confidence=0.9
+                        ))
+
+                elif len(groups) >= 2 and not first_group_is_struct_type:
                     subpara = groups[0]
                     if len(groups) == 2:
                         # Check if this is strike-and-insert or just strike

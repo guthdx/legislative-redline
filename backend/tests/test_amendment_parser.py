@@ -284,5 +284,64 @@ class TestPhase2Integration:
         assert len(redesignates) >= 1
 
 
+class TestParagraphReplacementWithNewlines:
+    """Test Bug Fix: striking paragraph (X) and inserting the following with text after newlines."""
+
+    def test_strike_paragraph_insert_following_with_newlines(self):
+        """Test parsing 'striking paragraph (1) and inserting the following:' with quoted text after newlines."""
+        parser = AmendmentParser()
+        # This is the actual pattern from PAT26007.docx
+        text = '''Section 302(b) is amended by striking paragraph (1) and inserting the following:
+
+"(1) In general.—The Secretary may make a direct loan under this subtitle only to a farmer or rancher who—
+
+"(A) has at least 1 year of experience; or
+
+"(B) has other acceptable education or experience."'''
+        result = parser.parse(text)
+        assert result.success is True
+        assert len(result.amendments) >= 1
+
+        # Find the strike_insert amendment
+        strike_inserts = [a for a in result.amendments if a.amendment_type == AmendmentType.STRIKE_INSERT]
+        assert len(strike_inserts) >= 1
+
+        amendment = strike_inserts[0]
+        # Should correctly identify "paragraph (1)" not "subparagraph (1)"
+        assert "paragraph" in amendment.text_to_strike.lower()
+        assert "(1)" in amendment.text_to_strike
+        # Should capture the replacement text
+        assert amendment.text_to_insert is not None
+        assert "(1) In general" in amendment.text_to_insert
+
+    def test_strike_subparagraph_insert_following(self):
+        """Test that subparagraph pattern still works correctly."""
+        parser = AmendmentParser()
+        text = '''by striking subparagraph (E) and inserting the following:
+
+"(E) refinancing indebtedness."'''
+        result = parser.parse(text)
+        assert result.success is True
+
+        strike_inserts = [a for a in result.amendments if a.amendment_type == AmendmentType.STRIKE_INSERT]
+        assert len(strike_inserts) >= 1
+
+        amendment = strike_inserts[0]
+        # Should correctly identify "subparagraph (E)"
+        assert "subparagraph" in amendment.text_to_strike.lower()
+        assert "(E)" in amendment.text_to_strike
+        assert "refinancing" in amendment.text_to_insert.lower()
+
+    def test_inline_paragraph_insert(self):
+        """Test inline paragraph strike and insert without newlines."""
+        parser = AmendmentParser()
+        text = '''by striking paragraph (2) and inserting "new text here"'''
+        result = parser.parse(text)
+        assert result.success is True
+
+        amendments = [a for a in result.amendments if a.amendment_type == AmendmentType.STRIKE_INSERT]
+        assert len(amendments) >= 1
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
