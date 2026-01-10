@@ -168,8 +168,9 @@ class AmendmentParser:
         ),
         # "by striking paragraph (X) and inserting the following:" with quoted text after newlines
         # Captures full "paragraph (X)" as group 1, insert text as group 2
+        # Handles truncated context where closing quote may be missing
         re.compile(
-            r'(?:by\s+)?striking\s+(paragraph\s*\(\d+\))\s+and\s+inserting\s+the\s+following:\s*\n+["\u201c](.+?)["\u201d](?=\s*\n|\Z)',
+            r'(?:by\s+)?striking\s+(paragraph\s*\(\d+\))\s+and\s+inserting\s+the\s+following:\s*\n+["\u201c](.+?)(?:["\u201d]|\Z)',
             re.IGNORECASE | re.DOTALL
         ),
         # "by striking paragraph (X) and inserting 'Y'" (inline)
@@ -348,8 +349,9 @@ class AmendmentParser:
             re.IGNORECASE
         ),
         # "by striking subparagraph (E) and inserting the following:" - captures structural type
+        # Handles truncated context where closing quote may be missing
         re.compile(
-            r'(?:by\s+)?striking\s+(subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+the\s+following:\s*\n*["\u201c](.+?)["\u201d](?=\s*\n|\Z)',
+            r'(?:by\s+)?striking\s+(subparagraph|paragraph|clause)\s*\(([A-Za-z0-9]+)\)\s+and\s+inserting\s+the\s+following:\s*\n*["\u201c](.+?)(?:["\u201d]|\Z)',
             re.IGNORECASE | re.DOTALL
         ),
         # "by striking subparagraph (E) and inserting 'X'" (inline) - captures structural type
