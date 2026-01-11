@@ -82,10 +82,18 @@ class CitationDetector:
     MAX_CONTEXT_FORWARD = 3000  # Max forward scan for amendment block end
 
     # Patterns that mark the start of a new section/subsection
+    # Note: Avoid matching amendment instructions like "(A) by striking..."
+    # Section headers typically start with capital words, not action verbs like "by", "in", "on"
     SECTION_BOUNDARY_PATTERN = re.compile(
-        r'\n\s*(SEC\.\s*\d+\.|\([a-z]\)\s+[A-Z]|\[\s*Option|\n\n\([a-z]\)\s)',
-        re.IGNORECASE
+        r'\n\s*(SEC\.\s*\d+\.'  # "SEC. 101." - explicit section marker
+        r'|\([a-z]\)\s+[A-Z][a-z]{2,}'  # "(a) General" - subsection with title (lowercase letter)
+        r'|\[\s*Option'  # "[Option" - option markers in legislative drafts
+        r'|\n\n\([a-z]\)\s+[A-Z])',  # Double newline + "(a) X" - new subsection after blank line
+        re.IGNORECASE  # Only affects SEC. matching, subsection patterns use explicit case
     )
+
+    # Amendment action words that should NOT be treated as section boundaries
+    AMENDMENT_ACTION_WORDS = {'by', 'in', 'on', 'at', 'and', 'or', 'to', 'for', 'the'}
 
     def detect_all(self, text: str) -> List[DetectedCitation]:
         """
