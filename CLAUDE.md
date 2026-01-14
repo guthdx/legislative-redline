@@ -64,6 +64,9 @@ legislative_redline/
 │   │   └── services/api.js      # API client
 │   ├── Dockerfile
 │   └── package.json
+├── docs/                      # Sample legislative documents
+│   ├── PAT26007.docx          # Farm bill amendment specs
+│   └── *.pdf, *.html          # Additional test documents
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -152,13 +155,22 @@ The parser normalizes smart quotes before processing:
 | `designate` | designating X as Y | "by designating the matter preceding paragraph (1) as subsection (a)" |
 | `strike_redesignate` | strike X and redesignate | "by striking paragraph (2) and redesignating paragraphs (3) through (5)" |
 
+### Phase 3: Bug Fixes (Jan 2025)
+
+Fixed three critical bugs affecting amendment parsing:
+
+1. **Pattern capture after newlines** - `STRIKE_INSERT_PATTERNS` now captures replacement text that appears after `\n\n` using `re.DOTALL`
+2. **Structural element type** - Parser now correctly identifies "paragraph" vs "subparagraph" instead of hardcoding
+3. **Context extraction truncation** - `SECTION_BOUNDARY_PATTERN` in `citation_detector.py` no longer incorrectly matches amendment instructions like "(A) by striking..." as section boundaries
+
 ### Coverage Analysis (Jan 2025)
 
 Based on analysis of 2.3M+ characters of legislative text:
-- **~99.7% pattern coverage** after Phase 1 + 2
+- **~99.7% pattern coverage** after Phase 1 + 2 + 3
 - 598 amendment operations analyzed
 - Phase 1 added: further_amended, quote normalization
 - Phase 2 added: redesignate ranges, designate patterns
+- Phase 3 fixed: multiline inserts, structural type capture, context truncation
 
 ## Development
 
@@ -256,3 +268,14 @@ Some PDFs are image-based. Enable OCR with `pymupdf` + `pytesseract`.
 
 ### Statute not found
 Citation may reference a repealed section or use non-standard format. Check logs.
+
+### Amendment shows "unknown" type with no changes
+This was fixed in Phase 3. Common causes were:
+1. **Context truncation** - The `SECTION_BOUNDARY_PATTERN` was incorrectly matching amendment instructions like "(A) by striking..." as section boundaries, truncating context to ~118 chars
+2. **Multiline insert text** - Patterns weren't capturing replacement text after `\n\n`
+3. **Structural type hardcoding** - Code was using "subparagraph" even when "paragraph" was matched
+
+If you see this issue, ensure you have the latest code from commits `e530b5a`, `36daf2a`, `8c630a7`.
+
+### Definitional references showing as amendments
+Citations that are definitional (e.g., "has the meaning given in section X") should show as "unknown" with no changes. The system correctly identifies these and displays: "This citation is a definitional reference."
